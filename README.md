@@ -67,16 +67,70 @@ python main.py --estimate --env prod
 # 4. Monte Carlo simulation
 python main.py --sim-returns --trials 2000
 
-# 5. Configure API credentials (for live trading)
-cp .env.example .env
-# Edit .env with your Kalshi API key ID and private key path
-
-# 6. One-shot scan (requires auth)
-python main.py --scan --env demo
-
-# 7. Start the live engine loop
-python main.py --env demo
+# 5. Daily profit simulation (30-day non-stop projection)
+python main.py --sim-daily --days 30 --capital 500 --env prod
 ```
+
+## Running Autonomously
+
+### Step 1: Configure API credentials
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env`:
+```dotenv
+KALSHI_API_KEY_ID=<your-uuid-from-kalshi>
+KALSHI_PRIVATE_KEY_PATH=./kalshi.key
+KALSHI_ENV=prod
+DRY_RUN=false          # ← set false for real trading
+```
+
+Generate API keys at: **https://kalshi.com/account/profile → API Keys**
+
+### Step 2: Test in dry-run mode
+
+```bash
+python run_engine.py              # Dry-run: scans + detects arbs, no real orders
+```
+
+Watch the logs scroll — verify it's finding arbs correctly. Check:
+- Console output for scan cycle summaries
+- `results/kalshi_arb.log` for detailed logs
+- `results/heartbeat.txt` for liveness (updated every 60s)
+
+### Step 3: Go live
+
+```bash
+python run_engine.py --live       # REAL MONEY — places actual orders
+```
+
+### Step 4: Auto-start on Windows login (optional)
+
+```bash
+python run_engine.py --install-task    # Creates Windows Task Scheduler task
+```
+
+The engine will auto-start 30 seconds after login, restart on crashes, and run indefinitely.
+
+### Managing the engine
+
+```bash
+python stop_engine.py                  # Graceful shutdown
+python run_engine.py --uninstall-task  # Remove auto-start task
+python main.py --report                # View P&L report
+python main.py --balance --env prod    # Check Kalshi balance
+```
+
+### Monitoring
+
+| File | Purpose |
+|------|---------|
+| `results/kalshi_arb.log` | Full engine logs (5MB rotating × 5 backups) |
+| `results/heartbeat.txt` | Updated every 60s — "alive", "crashed", or "stopped" |
+| `results/engine.pid` | Process ID for external management |
+| `results/positions.json` | All arb positions (open + settled) |
 
 ## CLI Reference
 
@@ -84,13 +138,17 @@ python main.py --env demo
 |---------|-------|-------------|
 | `python main.py --estimate` | No | Scan ME events, show arb opportunities + profit table |
 | `python main.py --sim-returns` | No | Monte Carlo simulate settlement outcomes (default 1000 trials) |
-| `python main.py --sim-returns --trials 5000 --seed 42` | No | Reproducible simulation |
+| `python main.py --sim-daily --days 30 --capital 500` | No | Simulate daily P&L if engine ran non-stop |
 | `python main.py --scan` | Yes | One-shot scan, print arb signals, exit |
 | `python main.py --balance` | Yes | Show Kalshi account balance |
 | `python main.py --report` | No | Print P&L report from `results/positions.json` |
 | `python main.py` | Yes | Start continuous arb engine loop |
 | `python main.py --dry-run` | Yes | Force dry-run mode (no real orders) |
 | `python main.py --env prod` | — | Use production API instead of demo |
+| `python run_engine.py` | Yes | Autonomous launcher (dry-run) with auto-restart |
+| `python run_engine.py --live` | Yes | Autonomous launcher (LIVE — real orders) |
+| `python run_engine.py --install-task` | — | Auto-start engine on Windows login |
+| `python stop_engine.py` | — | Gracefully shut down the running engine |
 
 ## How It Works
 
@@ -153,8 +211,11 @@ The engine signs each request with: `RSA-PSS(timestamp_ms + HTTP_METHOD + path)`
 
 ```
 kalshi-arb-engine/
-├── main.py                  # CLI entry point
-├── estimate.py              # Profit estimator + Monte Carlo (no auth)
+├── main.py                  # CLI entry point (scan, estimate, sim, report)
+├── run_engine.py            # Autonomous launcher (auto-restart, task scheduler)
+├── stop_engine.py           # Graceful shutdown
+├── estimate.py              # Profit estimator + Monte Carlo + daily sim (no auth)
+├── sim_offline.py           # Offline daily sim using cached arb data
 ├── engine/
 │   ├── __init__.py
 │   ├── config.py            # Config from .env
@@ -165,7 +226,7 @@ kalshi-arb-engine/
 │   ├── trading_engine.py    # Scan→detect→execute→settle loop
 │   ├── report.py            # P&L report printer
 │   └── logger_setup.py      # Logging config
-├── results/                 # Positions + logs (gitignored)
+├── results/                 # Positions + logs + heartbeat (gitignored)
 ├── .env.example
 ├── .gitignore
 ├── requirements.txt

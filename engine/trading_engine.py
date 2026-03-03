@@ -10,6 +10,7 @@ Secondary: Single-market sum arb (yes_ask + no_ask < 100¢) — rare.
 from __future__ import annotations
 
 import logging
+import os
 import time
 from datetime import datetime, timezone
 from typing import List, Union
@@ -28,16 +29,38 @@ class TradingEngine:
 
     def __init__(self, cfg: Config) -> None:
         self._cfg = cfg
-        self._client = KalshiClient(cfg) if not cfg.dry_run else None
 
-        data_client = KalshiClient(cfg)
-        self._scanner = MarketScanner(data_client, cfg)
-        self._executor = ArbExecutor(self._client, cfg)
+        if cfg.dry_run and (not cfg.api_key_id or not cfg.private_key_path
+                           or not os.path.isfile(cfg.private_key_path)):
+            # Dry-run without credentials — scanner can't auth-scan
+            # but estimate.py fetch (no-auth) still works via --estimate
+            logger.warning(
+                "Dry-run mode with no valid credentials. "
+                "Engine loop requires API keys even for read-only scanning."
+            )
+            self._client = None
+            self._data_client = None
+            self._scanner = None
+            self._executor = ArbExecutor(None, cfg)
+        else:
+            self._client = KalshiClient(cfg) if not cfg.dry_run else None
+            self._data_client = KalshiClient(cfg)
+            self._scanner = MarketScanner(self._data_client, cfg)
+            self._executor = ArbExecutor(self._client, cfg)
+
         self._store = PositionStore()
 
     def run(self) -> None:
         """Run the arb engine loop forever (or until KeyboardInterrupt)."""
         cfg = self._cfg
+
+        if not self._scanner:
+            raise RuntimeError(
+                "Cannot run engine: no API credentials configured.\n"
+                "1. Copy .env.example → .env\n"
+                "2. Set KALSHI_API_KEY_ID and KALSHI_PRIVATE_KEY_PATH\n"
+                "3. Generate keys at: https://kalshi.com/account/profile → API Keys"
+            )
 
         print("\n" + "=" * 72)
         print("  KALSHI MULTI-OUTCOME ARBITRAGE ENGINE")
@@ -145,15 +168,16 @@ class TradingEngine:
     def _check_settlements(self) -> None:
         """Check if any open positions have settled."""
         open_pos = self._store.open_positions()
-        if not open_pos:
+        if not open_pos or not self._data_client:
             return
 
         for pos in open_pos:
             try:
-                data = KalshiClient(self._cfg).get_market(pos.ticker)
+                data = self._data_client.get_market(pos.ticker)
                 mkt = data.get("market", data)
                 result = mkt.get("result", "")
                 if result in ("yes", "no", "void"):
                     self._store.settle(pos.ticker, result)
+                    logger.info("Position %s settled: %s", pos.ticker, result)
             except Exception as exc:
                 logger.debug("Cannot check settlement for %s: %s", pos.ticker, exc)

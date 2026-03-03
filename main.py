@@ -53,10 +53,16 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--env",          type=str, default=None,
                    choices=["demo", "prod"],
                    help="API environment (default: from .env or demo).")
+    p.add_argument("--sim-daily",    action="store_true",
+                   help="Simulate daily P&L if engine ran non-stop (uses live data).")
+    p.add_argument("--days",         type=int, default=30,
+                   help="Number of days to simulate for --sim-daily (default: 30).")
+    p.add_argument("--capital",      type=float, default=500.0,
+                   help="Starting capital in dollars for --sim-daily (default: 500).")
     p.add_argument("--trials",       type=int, default=1_000,
-                   help="Number of Monte Carlo trials for --sim-returns (default: 1000).")
+                   help="Number of Monte Carlo trials (default: 1000).")
     p.add_argument("--seed",         type=int, default=None,
-                   help="RNG seed for reproducible --sim-returns runs.")
+                   help="RNG seed for reproducible simulation runs.")
     return p.parse_args()
 
 
@@ -71,11 +77,12 @@ def cmd_scan(cfg) -> None:
     scanner = MarketScanner(client, cfg)
     result = scanner.scan()
 
-    print(f"\n  Scanned {result.total_scanned} markets in {result.elapsed_ms:.0f}ms")
-    print(f"  Arb signals: {len(result.arb_signals)}\n")
+    print(f"\n  Scanned {result.me_events} ME events, {result.total_markets} markets "
+          f"in {result.elapsed_ms:.0f}ms")
+    print(f"  Event arbs: {len(result.event_arbs)}  |  Single arbs: {len(result.single_arbs)}\n")
 
-    if not result.arb_signals:
-        print("  No YES+NO sum arb found. Markets are efficiently priced right now.")
+    if not result.event_arbs and not result.single_arbs:
+        print("  No arb signals found. Markets are efficiently priced right now.")
         print("  The engine scans continuously to catch transient mispricings.\n")
         return
 
@@ -85,25 +92,40 @@ def cmd_scan(cfg) -> None:
     except ImportError:
         tab = False
 
-    rows = []
-    for m in result.arb_signals:
-        rows.append([
-            m.ticker[:35],
-            f"{m.yes_ask}¢",
-            f"{m.no_ask}¢",
-            f"{m.yes_ask + m.no_ask}¢",
-            f"{m.locked_profit_cents}¢",
-            m.volume_24h,
-            f"{m.hours_to_expiry:.0f}h",
-        ])
+    if result.event_arbs:
+        rows = []
+        for ea in result.event_arbs:
+            rows.append([
+                ea.event_ticker[:30],
+                ea.arb_type.replace("_", " ").upper(),
+                ea.n_markets,
+                f"{ea.sum_ask}¢",
+                f"{ea.profit_per_set}¢",
+                f"{ea.roi_per_set:+.0%}",
+            ])
+        hdrs = ["Event", "Strategy", "Legs", "Sum Ask", "Profit/set", "ROI"]
+        if tab:
+            print(tabulate(rows, headers=hdrs, tablefmt="rounded_outline"))
+        else:
+            for r in rows:
+                print("  " + "  ".join(str(c) for c in r))
 
-    hdrs = ["Ticker", "YES ask", "NO ask", "Sum", "Profit/pair", "Vol24h", "Expiry"]
-    if tab:
-        print(tabulate(rows, headers=hdrs, tablefmt="rounded_outline"))
-    else:
-        print("  " + "  ".join(hdrs))
-        for r in rows:
-            print("  " + "  ".join(str(c) for c in r))
+    if result.single_arbs:
+        rows = []
+        for m in result.single_arbs:
+            rows.append([
+                m.ticker[:35],
+                f"{m.yes_ask}¢",
+                f"{m.no_ask}¢",
+                f"{m.locked_profit_cents}¢",
+                m.volume_24h,
+            ])
+        hdrs = ["Ticker", "YES", "NO", "Profit", "Vol24h"]
+        if tab:
+            print(tabulate(rows, headers=hdrs, tablefmt="rounded_outline"))
+        else:
+            for r in rows:
+                print("  " + "  ".join(str(c) for c in r))
     print()
 
 
@@ -117,6 +139,16 @@ def cmd_sim_returns(cfg, n_trials: int = 1_000, seed: int | None = None) -> None
     """Monte Carlo simulate resolution of arb positions."""
     from estimate import run_simulation
     run_simulation(cfg, n_trials=n_trials, seed=seed)
+
+
+def cmd_sim_daily(
+    cfg, n_days: int = 30, n_trials: int = 1_000,
+    seed: int | None = None, capital: float = 500.0,
+) -> None:
+    """Simulate daily P&L if engine ran non-stop."""
+    from estimate import run_daily_sim
+    run_daily_sim(cfg, n_days=n_days, n_trials=n_trials, seed=seed,
+                  capital_dollars=capital)
 
 
 def cmd_report() -> None:
@@ -164,6 +196,9 @@ def main() -> None:
     try:
         if args.estimate:
             cmd_estimate(cfg)
+        elif args.sim_daily:
+            cmd_sim_daily(cfg, n_days=args.days, n_trials=args.trials,
+                          seed=args.seed, capital=args.capital)
         elif args.sim_returns:
             cmd_sim_returns(cfg, n_trials=args.trials, seed=args.seed)
         elif args.scan:

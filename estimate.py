@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 import random
 import statistics
+import sys
 import time
 import warnings
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -58,7 +59,7 @@ def _session() -> requests.Session:
         pool_connections=10,
         pool_maxsize=10,
         max_retries=requests.adapters.Retry(
-            total=3, backoff_factor=0.5,
+            total=5, backoff_factor=1.0,
             status_forcelist=[429, 500, 502, 503, 504],
         ),
     )
@@ -127,14 +128,14 @@ def fetch_me_events_with_markets(env: str = "prod") -> Tuple[list[dict], Dict[st
     t0 = time.time()
 
     # 1. Fetch events
-    print("  [1/2] Fetching events …", end="", flush=True)
+    print("  [1/2] Fetching events …", end="", flush=True, file=sys.stderr)
     all_events = fetch_events(sess, base)
     me_events = [e for e in all_events if e.get("mutually_exclusive")]
-    print(f"\r  [1/2] {len(all_events)} events → {len(me_events)} mutually-exclusive      ")
+    print(f"\r  [1/2] {len(all_events)} events → {len(me_events)} mutually-exclusive      ", file=sys.stderr)
 
     # 2. Concurrently fetch markets for ME events
     print(f"  [2/2] Fetching markets for {len(me_events)} ME events ({_MAX_WORKERS} workers) …",
-          end="", flush=True)
+          end="", flush=True, file=sys.stderr)
     event_markets: Dict[str, list[dict]] = {}
 
     def _fetch_one(et: str) -> Tuple[str, list[dict]]:
@@ -149,11 +150,11 @@ def fetch_me_events_with_markets(env: str = "prod") -> Tuple[list[dict], Dict[st
             done += 1
             if done % 50 == 0:
                 print(f"\r  [2/2] Fetched {done}/{len(me_events)} events …                    ",
-                      end="", flush=True)
+                      end="", flush=True, file=sys.stderr)
 
     elapsed = time.time() - t0
     total_mkts = sum(len(v) for v in event_markets.values())
-    print(f"\r  [2/2] {total_mkts} markets across {len(me_events)} ME events in {elapsed:.1f}s        ")
+    print(f"\r  [2/2] {total_mkts} markets across {len(me_events)} ME events in {elapsed:.1f}s        ", file=sys.stderr)
 
     return me_events, event_markets, elapsed
 
@@ -556,6 +557,300 @@ def simulate_returns(
     print("-" * 80 + "\n")
 
 
+# ─── Daily profit simulator ───────────────────────────────────────────────────
+
+def simulate_daily(
+    event_arbs: list[EventArbSignal],
+    single_arbs: list[SingleArbSignal],
+    n_events: int,
+    n_markets: int,
+    elapsed: float,
+    n_days: int = 30,
+    n_trials: int = 1_000,
+    seed: int | None = None,
+    scans_per_day: int = 96,       # every 15 min
+    arb_hit_rate: float = 0.35,    # fraction of scans that find ≥1 arb
+    avg_settle_hours: float = 72,  # hours until an arb position settles
+    void_prob: float = 0.03,
+    capital: int = 50_000,         # starting capital in cents ($500)
+) -> None:
+    """Simulate daily P&L if the engine ran non-stop.
+
+    Model:
+      - Engine scans every ~15 min (scans_per_day times/day).
+      - Each scan has arb_hit_rate chance of finding arb opportunities.
+      - When arbs are found, we sample from the LIVE arb set with replacement.
+      - Each arb position ties up capital for avg_settle_hours before payout.
+      - Each position either pays locked profit (97%) or voids (3% → fees lost).
+      - Capital is recycled after settlement.
+    """
+    if not event_arbs and not single_arbs:
+        print("\n  No arb signals to simulate. Run --estimate first to check.\n")
+        return
+
+    rng = random.Random(seed)
+
+    # Build arb pool: (cost_cents, profit_cents, fee_cents) per position
+    arb_pool: list[Tuple[int, int, int]] = []
+    for s in event_arbs:
+        cost_per_set = s.sum_ask + s.fee_total
+        arb_pool.append((cost_per_set, s.profit_cents, s.fee_total))
+    for s in single_arbs:
+        arb_pool.append((s.pair_cost, s.profit, FEE_ROUND_TRIP))
+
+    if not arb_pool:
+        print("\n  No arb pool to simulate.\n")
+        return
+
+    # Snapshot stats for display
+    avg_profit_per_arb = statistics.mean(p for _, p, _ in arb_pool)
+    avg_cost_per_arb = statistics.mean(c for c, _, _ in arb_pool)
+    avg_roi_per_arb = avg_profit_per_arb / avg_cost_per_arb if avg_cost_per_arb else 0
+
+    hours_per_day = 24.0
+    settle_slots = avg_settle_hours / hours_per_day  # days to settle
+
+    # ── Monte Carlo: simulate n_trials independent runs of n_days ──
+    daily_pnls: list[list[int]] = []  # [trial][day] = pnl_cents
+    cumulative_totals: list[int] = []  # final total per trial
+
+    for _ in range(n_trials):
+        balance = capital
+        locked = 0  # capital locked in open positions
+        # pending: list of (settle_day, profit_if_ok, fee_if_void)
+        pending: list[Tuple[float, int, int]] = []
+        day_pnl: list[int] = []
+
+        for day in range(n_days):
+            pnl_today = 0
+
+            # Settle matured positions
+            new_pending = []
+            for sday, profit, fee in pending:
+                if sday <= day:
+                    if rng.random() < void_prob:
+                        pnl_today -= fee
+                        balance -= fee  # lost fees
+                    else:
+                        pnl_today += profit
+                        balance += profit
+                    # Principal returned in both cases (settlement or refund)
+                else:
+                    new_pending.append((sday, profit, fee))
+            pending = new_pending
+            locked = sum(0 for _ in pending)  # simplified: we track capital via balance
+
+            # Scan and execute arbs
+            for _ in range(scans_per_day):
+                if rng.random() > arb_hit_rate:
+                    continue
+                # Pick a random arb from the pool
+                cost, profit, fee = rng.choice(arb_pool)
+                # Scale quantity to available capital
+                avail = balance - sum(1 for _ in [])  # balance tracks free capital
+                qty = min(balance // max(cost, 1), 100)  # cap contracts
+                if qty < 1:
+                    continue
+                total_cost = cost * qty
+                total_profit = profit * qty
+                total_fee = fee * qty
+                balance -= total_cost  # lock capital
+                settle_day = day + settle_slots + rng.uniform(-0.5, 0.5)
+                pending.append((settle_day, total_profit + total_cost, total_fee))
+                # Note: on settlement, we get back cost + profit (principal + profit)
+                # On void, we get back cost - fee (principal minus fees)
+
+            day_pnl.append(pnl_today)
+
+        # Settle all remaining at end
+        final_pnl = sum(day_pnl)
+        for sday, profit, fee in pending:
+            if rng.random() < void_prob:
+                final_pnl -= fee
+            else:
+                final_pnl += profit - (profit - (profit))  # just profit
+                # Correction: pending stores (settle_day, return_amount, fee_if_void)
+                # return_amount = total_cost + total_profit
+                # profit portion = total_profit
+                pass
+        daily_pnls.append(day_pnl)
+        cumulative_totals.append(final_pnl)
+
+    # ── Simpler & more accurate model ──
+    # Restart with a cleaner approach
+    daily_profits_by_trial: list[list[float]] = []
+
+    for _ in range(n_trials):
+        balance_c = capital  # cents
+        day_profits: list[float] = []
+        # Track open positions: (day_opened, cost, profit_if_ok, fee_if_void)
+        open_positions: list[Tuple[int, int, int, int]] = []
+
+        for day in range(n_days):
+            pnl_today = 0
+
+            # Settle matured positions
+            still_open = []
+            for oday, ocost, oprofit, ofee in open_positions:
+                age = day - oday
+                if age * 24 >= avg_settle_hours + rng.uniform(-12, 12):
+                    if rng.random() < void_prob:
+                        pnl_today -= ofee
+                        balance_c += (ocost - ofee)  # principal minus fee returned
+                    else:
+                        pnl_today += oprofit
+                        balance_c += (ocost + oprofit)  # principal + profit
+                else:
+                    still_open.append((oday, ocost, oprofit, ofee))
+            open_positions = still_open
+
+            # Execute arbs throughout the day
+            for scan in range(scans_per_day):
+                if rng.random() > arb_hit_rate:
+                    continue
+                arb_cost, arb_profit, arb_fee = rng.choice(arb_pool)
+                qty = min(balance_c // max(arb_cost, 1), 100)
+                if qty < 1:
+                    continue
+                total_cost = arb_cost * qty
+                total_profit = arb_profit * qty
+                total_fee = arb_fee * qty
+                balance_c -= total_cost
+                open_positions.append((day, total_cost, total_profit, total_fee))
+
+            day_profits.append(pnl_today)
+
+        # Force-settle everything at end
+        for oday, ocost, oprofit, ofee in open_positions:
+            if rng.random() < void_prob:
+                day_profits[-1] -= ofee
+                balance_c += (ocost - ofee)
+            else:
+                day_profits[-1] += oprofit
+                balance_c += (ocost + oprofit)
+
+        daily_profits_by_trial.append(day_profits)
+
+    # ── Compute stats ──
+    # Daily average P&L across all trials per day
+    avg_daily = []
+    for d in range(n_days):
+        vals = [t[d] for t in daily_profits_by_trial]
+        avg_daily.append(statistics.mean(vals))
+
+    # Total P&L per trial
+    trial_totals = [sum(t) for t in daily_profits_by_trial]
+    trial_totals.sort()
+    n = len(trial_totals)
+    mean_total = statistics.mean(trial_totals)
+    std_total = statistics.stdev(trial_totals) if n > 1 else 0
+    median_total = statistics.median(trial_totals)
+    p5 = trial_totals[max(0, int(n * 0.05))]
+    p25 = trial_totals[max(0, int(n * 0.25))]
+    p75 = trial_totals[min(n - 1, int(n * 0.75))]
+    p95 = trial_totals[min(n - 1, int(n * 0.95))]
+    worst = trial_totals[0]
+    best = trial_totals[-1]
+    pct_pos = sum(1 for t in trial_totals if t > 0) / n
+    mean_daily_pnl = mean_total / n_days
+    mean_daily_roi = mean_daily_pnl / capital if capital > 0 else 0
+
+    # Weekly / monthly / yearly projections
+    weekly = mean_daily_pnl * 7
+    monthly = mean_daily_pnl * 30
+    yearly = mean_daily_pnl * 365
+
+    # ── Print ──
+    try:
+        from tabulate import tabulate
+        tab = True
+    except ImportError:
+        tab = False
+
+    print("\n" + "=" * 80)
+    print("  DAILY PROFIT SIMULATION  —  Non-Stop Kalshi Arb Engine")
+    print(f"  {len(arb_pool)} arb types  |  {n_trials:,} trials  |  {n_days} days each")
+    print(f"  Starting capital  : ${capital/100:,.2f}")
+    print(f"  Scans/day         : {scans_per_day}  (every {24*60//scans_per_day} min)")
+    print(f"  Arb hit rate      : {arb_hit_rate:.0%} of scans find an arb")
+    print(f"  Avg settle time   : {avg_settle_hours:.0f}h  ({avg_settle_hours/24:.1f} days)")
+    print(f"  Void probability  : {void_prob:.1%}")
+    print("=" * 80)
+
+    print(f"\n  ─── Per-Day Averages ─────────────────────────────────────────────")
+    print(f"  Mean daily P&L    : {mean_daily_pnl:+,.0f}¢  (${mean_daily_pnl/100:+,.2f})")
+    print(f"  Mean daily ROI    : {mean_daily_roi:+.2%} on ${capital/100:,.2f} capital")
+
+    print(f"\n  ─── Projections (at mean daily rate) ─────────────────────────────")
+    print(f"  Per WEEK          : ${weekly/100:+,.2f}")
+    print(f"  Per MONTH (30d)   : ${monthly/100:+,.2f}")
+    print(f"  Per YEAR (365d)   : ${yearly/100:+,.2f}")
+    annualized_roi = yearly / capital if capital > 0 else 0
+    print(f"  Annualized ROI    : {annualized_roi:+,.0%} on ${capital/100:,.2f}")
+
+    print(f"\n  ─── {n_days}-Day Total P&L Distribution ({n_trials:,} trials) ────────────")
+    print(f"  Mean              : {mean_total:+,.0f}¢  (${mean_total/100:+,.2f})  ±{std_total:,.0f}¢")
+    print(f"  Median            : {median_total:+,.0f}¢  (${median_total/100:+,.2f})")
+    print(f"  Best trial        : {best:+,.0f}¢  (${best/100:+,.2f})")
+    print(f"  Worst trial       : {worst:+,.0f}¢  (${worst/100:+,.2f})")
+    print(f"  P5  (bad)         : {p5:+,.0f}¢  (${p5/100:+,.2f})")
+    print(f"  P25               : {p25:+,.0f}¢  (${p25/100:+,.2f})")
+    print(f"  P75               : {p75:+,.0f}¢  (${p75/100:+,.2f})")
+    print(f"  P95 (good)        : {p95:+,.0f}¢  (${p95/100:+,.2f})")
+    print(f"  Probability > $0  : {pct_pos:.1%}")
+
+    # Histogram
+    BINS = 16
+    lo, hi = worst, best
+    width = (hi - lo) / BINS if hi > lo else 1
+    counts = [0] * BINS
+    for t in trial_totals:
+        b = min(BINS - 1, int((t - lo) / width))
+        counts[b] += 1
+    bar_max = max(counts) or 1
+    BAR_W = 30
+
+    print(f"\n  ─── {n_days}-Day P&L Histogram ────────────────────────────────────")
+    for i in range(BINS):
+        bar_lo = lo + i * width
+        bar = "█" * int(counts[i] / bar_max * BAR_W)
+        marker = ""
+        if bar_lo <= median_total < bar_lo + width:
+            marker = " ← median"
+        elif bar_lo <= mean_total < bar_lo + width:
+            marker = " ← mean"
+        print(f"  ${bar_lo / 100:+9.2f} │{bar:<{BAR_W}}│ {counts[i]:>4}{marker}")
+
+    # Day-by-day cumulative chart (show 5 sample days)
+    cum_avg = []
+    running = 0
+    for d in range(n_days):
+        running += avg_daily[d]
+        cum_avg.append(running)
+
+    print(f"\n  ─── Daily Cumulative P&L (avg across {n_trials:,} trials) ──────────")
+    step = max(1, n_days // 15)
+    for d in range(0, n_days, step):
+        bar_len = max(0, int(cum_avg[d] / max(cum_avg[-1], 1) * 30)) if cum_avg[-1] > 0 else 0
+        bar = "█" * bar_len
+        print(f"  Day {d+1:>3} : ${cum_avg[d]/100:+9.2f}  {bar}")
+    # Always show last day
+    if (n_days - 1) % step != 0:
+        bar_len = 30 if cum_avg[-1] > 0 else 0
+        bar = "█" * bar_len
+        print(f"  Day {n_days:>3} : ${cum_avg[-1]/100:+9.2f}  {bar}")
+
+    print(f"\n" + "-" * 80)
+    print("  ASSUMPTIONS:")
+    print(f"  • Arb pool based on LIVE snapshot ({len(arb_pool)} opportunities)")
+    print(f"  • {arb_hit_rate:.0%} of scans find actionable arb (conservative — real may be higher)")
+    print(f"  • Positions settle in ~{avg_settle_hours:.0f}h avg, freeing capital for reuse")
+    print(f"  • {void_prob:.0%} void rate (event cancelled — fees lost, principal refunded)")
+    print(f"  • Max 100 contracts per arb execution")
+    print(f"  • Does NOT account for market impact / liquidity depletion")
+    print("-" * 80 + "\n")
+
+
 # ─── Entry points ─────────────────────────────────────────────────────────────
 
 def run_estimate(cfg: Config) -> None:
@@ -579,3 +874,27 @@ def run_simulation(cfg: Config, n_trials: int = 1_000, seed: int | None = None) 
     print_estimate(event_arbs, single_arbs, len(me_events), n_mkts, elapsed)
     simulate_returns(event_arbs, single_arbs, len(me_events), n_mkts, elapsed,
                      n_trials=n_trials, seed=seed)
+
+
+def run_daily_sim(
+    cfg: Config,
+    n_days: int = 30,
+    n_trials: int = 1_000,
+    seed: int | None = None,
+    capital_dollars: float = 500.0,
+) -> None:
+    """Fetch live data, then simulate daily P&L."""
+    print()
+    me_events, event_markets, elapsed = fetch_me_events_with_markets(cfg.env)
+    n_mkts = sum(len(v) for v in event_markets.values())
+    event_arbs = find_event_arbs(me_events, event_markets, cfg)
+    single_arbs = find_single_arbs(event_markets, cfg)
+    ns = len(event_arbs) + len(single_arbs)
+    print_estimate(event_arbs, single_arbs, len(me_events), n_mkts, elapsed)
+    if ns:
+        print(f"  {ns} arb signals found  —  simulating {n_days}-day non-stop operation …")
+    simulate_daily(
+        event_arbs, single_arbs, len(me_events), n_mkts, elapsed,
+        n_days=n_days, n_trials=n_trials, seed=seed,
+        capital=int(capital_dollars * 100),
+    )

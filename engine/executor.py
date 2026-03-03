@@ -22,6 +22,11 @@ from .scanner import FEE_PER_CONTRACT, FEE_ROUND_TRIP, EventArbOpportunity, Mark
 
 logger = logging.getLogger(__name__)
 
+# Delay between consecutive arb order batches to avoid 429
+INTER_ARB_DELAY_SEC = 2.0
+# Delay between individual fallback orders
+INTER_ORDER_DELAY_SEC = 0.5
+
 
 @dataclass
 class LegResult:
@@ -84,9 +89,22 @@ class SingleArbExecution:
 class ArbExecutor:
     """Places orders to capture multi-outcome and single-market arb."""
 
-    def __init__(self, client: KalshiClient | None, cfg: Config) -> None:
+    def __init__(self, client: KalshiClient | None, cfg: Config,
+                 data_client: KalshiClient | None = None) -> None:
         self._client = client
         self._cfg = cfg
+        self._data_client = data_client or client
+
+    def get_available_balance_cents(self) -> int:
+        """Query Kalshi for current available cash balance in cents."""
+        if not self._data_client:
+            return 0
+        try:
+            bal = self._data_client.get_balance()
+            return int(bal.get("balance", 0))
+        except Exception as e:
+            logger.warning("Could not fetch balance: %s", e)
+            return 0
 
     # ── Multi-outcome event arb ───────────────────────────────────────────────
 
@@ -94,9 +112,11 @@ class ArbExecutor:
         """Buy YES (or NO) on all legs of a mutually-exclusive event."""
         t0 = time.perf_counter()
 
-        qty = self._calc_event_qty(opp)
+        # Query live balance to cap quantity
+        available = self.get_available_balance_cents() if not self._cfg.dry_run else 999999
+        qty = self._calc_event_qty(opp, available)
         if qty < 1:
-            return self._event_err(opp, "quantity=0")
+            return self._event_err(opp, f"quantity=0 (balance={available}¢)")
 
         set_cost = opp.sum_ask + opp.fee_total
         total_cost = set_cost * qty
@@ -144,15 +164,42 @@ class ArbExecutor:
             placed = [l for l in legs if l.status == "placed"]
             failed = [l for l in legs if l.status == "error"]
             logger.critical(
-                "PARTIAL FILL %s: %d/%d legs placed, %d failed — NAKED EXPOSURE",
+                "PARTIAL FILL %s: %d/%d legs placed, %d failed — ROLLING BACK",
                 opp.event_ticker, len(placed), len(legs), len(failed),
             )
             for f in failed:
                 logger.critical("  FAILED: %s %s — %s", f.side, f.ticker, f.error)
+
+            # ROLLBACK: sell the placed legs to unwind naked exposure
+            self._rollback_placed_legs(placed, opp.event_ticker)
         else:
             logger.error("EVENT ARB FAILED %s: all legs errored", opp.event_ticker)
 
         return result
+
+    def _rollback_placed_legs(self, placed: List[LegResult], event_ticker: str) -> None:
+        """Sell back placed legs to unwind partial/naked exposure."""
+        if not self._client or not placed:
+            return
+        logger.warning("ROLLBACK %s: selling %d placed leg(s)", event_ticker, len(placed))
+        for leg in placed:
+            try:
+                time.sleep(INTER_ORDER_DELAY_SEC)
+                # Sell at 1¢ below our buy price for quick fill (market sell)
+                sell_price = max(1, leg.price_cents - 1)
+                self._client.create_order(
+                    ticker=leg.ticker,
+                    action="sell",
+                    side=leg.side,
+                    count=leg.quantity,
+                    order_type="limit",
+                    yes_price=sell_price if leg.side == "yes" else None,
+                    no_price=sell_price if leg.side == "no" else None,
+                )
+                logger.info("  ROLLBACK sold %s %s qty=%d at %d¢",
+                            leg.side, leg.ticker, leg.quantity, sell_price)
+            except Exception as e:
+                logger.error("  ROLLBACK FAILED %s: %s", leg.ticker, e)
 
     def _place_event_legs(
         self, legs: list[tuple], side: str, qty: int
@@ -196,8 +243,9 @@ class ArbExecutor:
                         ))
             except KalshiAPIError as e:
                 logger.error("Batch order failed: %s", e)
-                # Fallback: try individual orders
+                # Fallback: try individual orders with rate limiting
                 for ticker, price in batch_legs:
+                    time.sleep(INTER_ORDER_DELAY_SEC)
                     results.append(self._place_single_order(ticker, side, price, qty))
             except Exception as e:
                 for ticker, price in batch_legs:
@@ -231,13 +279,18 @@ class ArbExecutor:
                 quantity=qty, status="error", error=str(e),
             )
 
-    def _calc_event_qty(self, opp: EventArbOpportunity) -> int:
-        """Max sets constrained by config limits."""
+    def _calc_event_qty(self, opp: EventArbOpportunity, available_balance: int = 999999) -> int:
+        """Max sets constrained by config limits AND available balance."""
         set_cost = opp.sum_ask + opp.fee_total
         if set_cost <= 0:
             return 0
         max_by_cost = self._cfg.max_order_cents // set_cost
-        return max(0, min(max_by_cost, self._cfg.max_contracts, 50_000))
+        max_by_balance = available_balance // set_cost
+        qty = max(0, min(max_by_cost, max_by_balance, self._cfg.max_contracts, 50_000))
+        if qty < max_by_cost:
+            logger.info("Qty capped by balance: %d (would be %d without cap, balance=%d¢)",
+                        qty, max_by_cost, available_balance)
+        return qty
 
     def _event_err(self, opp: EventArbOpportunity, msg: str) -> EventArbExecution:
         legs = [LegResult(t, "yes", p, 0, "error", error=msg) for t, p in opp.legs]

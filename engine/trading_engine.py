@@ -46,7 +46,7 @@ class TradingEngine:
             self._client = KalshiClient(cfg) if not cfg.dry_run else None
             self._data_client = KalshiClient(cfg)
             self._scanner = MarketScanner(self._data_client, cfg)
-            self._executor = ArbExecutor(self._client, cfg)
+            self._executor = ArbExecutor(self._client, cfg, data_client=self._data_client)
 
         self._store = PositionStore()
 
@@ -104,7 +104,7 @@ class TradingEngine:
 
         executions: list[Union[EventArbExecution, SingleArbExecution]] = []
 
-        # 3. Execute event arbs (primary strategy)
+        # 3. Execute event arbs (primary strategy) — one at a time with balance check
         for opp in scan.event_arbs:
             if self._store.count_open() >= cfg.max_open_positions:
                 logger.info("Max open positions (%d) reached", cfg.max_open_positions)
@@ -112,6 +112,11 @@ class TradingEngine:
             if self._store.has_ticker(opp.event_ticker):
                 logger.debug("Already have position on %s, skipping", opp.event_ticker)
                 continue
+
+            # Rate limit between consecutive arb executions
+            if executions:
+                from .executor import INTER_ARB_DELAY_SEC
+                time.sleep(INTER_ARB_DELAY_SEC)
 
             result = self._executor.execute_event_arb(opp)
             executions.append(result)

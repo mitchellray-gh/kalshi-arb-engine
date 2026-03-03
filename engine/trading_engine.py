@@ -1,33 +1,35 @@
 """
 engine/trading_engine.py — Main loop: scan → detect arb → execute → settle.
 
-Single strategy: YES + NO sum arbitrage.
-  When yes_ask + no_ask + fees < 100¢ → BUY BOTH → guaranteed profit.
+Primary: Multi-outcome event arb on mutually-exclusive events.
+  BUY-ALL-YES: sum(yes_ask) + fees < 100¢ → buy YES on every outcome.
+  BUY-ALL-NO:  sum(yes_bid) - fees > 100¢ → buy NO on every outcome.
+
+Secondary: Single-market sum arb (yes_ask + no_ask < 100¢) — rare.
 """
 from __future__ import annotations
 
 import logging
 import time
 from datetime import datetime, timezone
-from typing import List
+from typing import List, Union
 
 from .client import KalshiClient
 from .config import Config
-from .executor import ArbExecution, ArbExecutor
+from .executor import ArbExecutor, EventArbExecution, SingleArbExecution
 from .positions import ArbPosition, PositionStore
-from .scanner import FEE_ROUND_TRIP, MarketScanner, MarketQuote
+from .scanner import FEE_PER_CONTRACT, FEE_ROUND_TRIP, MarketScanner
 
 logger = logging.getLogger(__name__)
 
 
 class TradingEngine:
-    """Scan-detect-execute loop for YES+NO sum arbitrage."""
+    """Scan-detect-execute loop for multi-outcome + single-market arb."""
 
     def __init__(self, cfg: Config) -> None:
         self._cfg = cfg
         self._client = KalshiClient(cfg) if not cfg.dry_run else None
 
-        # Scanner always needs a client for data
         data_client = KalshiClient(cfg)
         self._scanner = MarketScanner(data_client, cfg)
         self._executor = ArbExecutor(self._client, cfg)
@@ -38,11 +40,12 @@ class TradingEngine:
         cfg = self._cfg
 
         print("\n" + "=" * 72)
-        print("  KALSHI YES+NO SUM ARBITRAGE ENGINE")
+        print("  KALSHI MULTI-OUTCOME ARBITRAGE ENGINE")
         print(f"  env={cfg.env}  dry_run={cfg.dry_run}")
         print(f"  min_profit={cfg.min_profit_cents}¢  max_order={cfg.max_order_cents}¢  "
               f"max_contracts={cfg.max_contracts}")
         print(f"  scan_interval={cfg.scan_interval_seconds}s")
+        print("  Strategies: BUY-ALL-YES, BUY-ALL-NO (ME events)")
         print("=" * 72 + "\n")
 
         while True:
@@ -55,35 +58,64 @@ class TradingEngine:
 
             time.sleep(cfg.scan_interval_seconds)
 
-    def run_once(self) -> List[ArbExecution]:
-        """Run a single scan+execute cycle. Returns list of executions."""
+    def run_once(self) -> List[Union[EventArbExecution, SingleArbExecution]]:
+        """Run a single scan+execute cycle."""
         return self._cycle()
 
-    def _cycle(self) -> List[ArbExecution]:
+    def _cycle(self) -> List[Union[EventArbExecution, SingleArbExecution]]:
         ts = datetime.now(timezone.utc).strftime("%H:%M:%S")
         cfg = self._cfg
 
         # 1. Settle any expired positions
         self._check_settlements()
 
-        # 2. Scan for arb
+        # 2. Scan for arbs
         scan = self._scanner.scan()
-        if not scan.arb_signals:
-            logger.debug("[%s] No arb signals (scanned %d markets)", ts, scan.total_scanned)
+
+        if not scan.event_arbs and not scan.single_arbs:
+            logger.debug(
+                "[%s] No arb signals (%d ME events, %d markets, %.0fms)",
+                ts, scan.me_events, scan.total_markets, scan.elapsed_ms,
+            )
             return []
 
-        # 3. Execute arbs (skip if already have position or at max)
-        executions: list[ArbExecution] = []
-        for mkt in scan.arb_signals:
+        executions: list[Union[EventArbExecution, SingleArbExecution]] = []
+
+        # 3. Execute event arbs (primary strategy)
+        for opp in scan.event_arbs:
             if self._store.count_open() >= cfg.max_open_positions:
-                logger.info("Max open positions (%d) reached, skipping remaining signals",
-                            cfg.max_open_positions)
+                logger.info("Max open positions (%d) reached", cfg.max_open_positions)
                 break
-            if self._store.has_ticker(mkt.ticker):
-                logger.debug("Already have open position on %s, skipping", mkt.ticker)
+            if self._store.has_ticker(opp.event_ticker):
+                logger.debug("Already have position on %s, skipping", opp.event_ticker)
                 continue
 
-            result = self._executor.execute(mkt)
+            result = self._executor.execute_event_arb(opp)
+            executions.append(result)
+
+            if result.success:
+                pos = ArbPosition(
+                    ticker=opp.event_ticker,
+                    title=opp.event_title,
+                    yes_price=opp.sum_ask,
+                    no_price=0,
+                    quantity=result.quantity,
+                    fee_total=opp.fee_total * result.quantity,
+                    locked_profit=opp.profit_per_set,
+                    total_cost=result.total_cost,
+                    total_profit=result.total_profit,
+                    opened_at=datetime.now(timezone.utc).isoformat(),
+                )
+                self._store.add(pos)
+
+        # 4. Execute single-market arbs (secondary, rare)
+        for mkt in scan.single_arbs:
+            if self._store.count_open() >= cfg.max_open_positions:
+                break
+            if self._store.has_ticker(mkt.ticker):
+                continue
+
+            result = self._executor.execute_single(mkt)
             executions.append(result)
 
             if result.success:
@@ -103,7 +135,9 @@ class TradingEngine:
 
         if executions:
             placed = sum(1 for e in executions if e.success)
-            total_profit = sum(e.total_profit for e in executions if e.success)
+            total_profit = sum(
+                e.total_profit for e in executions if e.success
+            )
             print(f"  [{ts}] {placed} arb(s) placed  |  locked profit: {total_profit}¢ (${total_profit/100:.2f})")
 
         return executions

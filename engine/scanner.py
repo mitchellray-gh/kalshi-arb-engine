@@ -1,27 +1,35 @@
 """
-engine/scanner.py — Scan Kalshi markets and build arb-ready snapshots.
+engine/scanner.py — Scan Kalshi markets for multi-outcome event arbitrage.
 
-Scans all open markets, groups by event, and returns MarketPair objects
-with yes_ask + no_ask (or derived from orderbook).
+PRIMARY STRATEGY: Multi-outcome ME event arb
+  - BUY-ALL-YES: sum(yes_ask) + fees < 100¢ → guaranteed profit
+  - BUY-ALL-NO:  sum(yes_bid) - fees > 100¢ → guaranteed profit
 
-Kalshi prices are in CENTS (1-99).  We keep cents internally.
-Settlement = 100 cents ($1.00).
+SECONDARY (rare): Single-market sum arb: yes_ask + no_ask < 100¢
+
+Kalshi prices are in CENTS (1-99). Settlement = 100 cents ($1.00).
 """
 from __future__ import annotations
 
 import logging
 import time
+import warnings
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from .client import KalshiClient
 from .config import Config
 
 logger = logging.getLogger(__name__)
 
-FEE_PER_CONTRACT = 2   # cents per contract per side (Kalshi charges ~$0.02)
+# Suppress urllib3 connection pool warnings
+warnings.filterwarnings("ignore", message="Connection pool is full")
+
+FEE_PER_CONTRACT = 2   # cents per contract per side (taker fee estimate)
 FEE_ROUND_TRIP   = FEE_PER_CONTRACT * 2   # buy + settle = 4 cents
+_MAX_WORKERS = 10
 
 
 @dataclass
@@ -32,7 +40,6 @@ class MarketQuote:
     title:          str
     category:       str
     status:         str
-    # Prices in cents (1-99)
     yes_bid:        int = 0
     yes_ask:        int = 0
     no_bid:         int = 0
@@ -41,7 +48,7 @@ class MarketQuote:
     volume_24h:     int = 0
     open_interest:  int = 0
     close_time:     str = ""
-    result:         str = ""    # "yes", "no", "void", "" (not settled)
+    result:         str = ""
 
     @property
     def yes_mid(self) -> float:
@@ -57,12 +64,10 @@ class MarketQuote:
 
     @property
     def pair_ask_cost(self) -> int:
-        """Total cost to buy YES + NO at the ask (cents)."""
         return self.yes_ask + self.no_ask
 
     @property
     def locked_profit_cents(self) -> int:
-        """Locked profit per pair after fees: 100 - yes_ask - no_ask - 2*fee."""
         return 100 - self.yes_ask - self.no_ask - FEE_ROUND_TRIP
 
     @property
@@ -76,7 +81,6 @@ class MarketQuote:
 
     @property
     def is_arb(self) -> bool:
-        """True if buying YES + NO costs less than $1.00 after fees."""
         return (
             self.yes_ask > 0
             and self.no_ask > 0
@@ -85,130 +89,226 @@ class MarketQuote:
 
 
 @dataclass
+class EventArbOpportunity:
+    """Multi-outcome event arb opportunity detected by scanner."""
+    event_ticker:      str
+    event_title:       str
+    arb_type:          str     # "buy_all_yes" or "buy_all_no"
+    n_markets:         int
+    legs:              list    # [(ticker, price_cents), ...]
+    sum_ask:           int     # total ask cost per 1 set (cents)
+    revenue:           int     # guaranteed settlement revenue (cents)
+    fee_total:         int     # total fees per set (cents)
+    profit_per_set:    int     # revenue - sum_ask - fees
+    category:          str = ""
+    collateral_type:   str = ""
+    mutually_exclusive: bool = True
+
+    @property
+    def roi_per_set(self) -> float:
+        cost = self.sum_ask + self.fee_total
+        return self.profit_per_set / cost if cost > 0 else 0.0
+
+
+@dataclass
 class ScanResult:
-    markets:     List[MarketQuote]
-    arb_signals: List[MarketQuote]   # subset where is_arb == True
-    elapsed_ms:  float
-    total_scanned: int
+    """Result from a full scan cycle."""
+    event_arbs:     List[EventArbOpportunity]
+    single_arbs:    List[MarketQuote]
+    me_events:      int
+    total_markets:  int
+    elapsed_ms:     float
 
 
 class MarketScanner:
-    """Scans all Kalshi open markets and identifies YES+NO sum arb opportunities."""
+    """Scans Kalshi for multi-outcome event arb and single-market sum arb."""
 
     def __init__(self, client: KalshiClient, cfg: Config) -> None:
         self._client = client
         self._cfg = cfg
 
     def scan(self) -> ScanResult:
+        """Full scan: fetch ME events → markets → detect arbs."""
         t0 = time.perf_counter()
-        all_markets: list[MarketQuote] = []
-        cursor: str | None = None
 
-        # Paginate through all open markets
-        while True:
-            resp = self._client.get_markets(
-                status="open",
-                cursor=cursor,
-                limit=200,
-            )
-            raw_markets = resp.get("markets", [])
-            if not raw_markets:
-                break
+        # 1. Fetch all events, filter ME
+        me_events = self._fetch_me_events()
+        logger.info("Found %d mutually-exclusive events", len(me_events))
 
-            for m in raw_markets:
-                mq = self._parse_market(m)
-                if mq:
-                    all_markets.append(mq)
+        # 2. Concurrently fetch markets per ME event
+        event_markets = self._fetch_event_markets(me_events)
+        total_mkts = sum(len(v) for v in event_markets.values())
+        logger.info("Fetched %d markets across %d ME events", total_mkts, len(me_events))
 
-            cursor = resp.get("cursor")
-            if not cursor:
-                break
+        # 3. Detect multi-outcome arbs
+        event_arbs = self._find_event_arbs(me_events, event_markets)
 
-        # Filter arb signals
-        arb_signals = [
-            m for m in all_markets
-            if m.is_arb
-            and m.locked_profit_cents >= self._cfg.min_profit_cents
-            and m.volume_24h >= self._cfg.min_volume_24h
-        ]
-
-        # Sort by locked profit descending (best arb first)
-        arb_signals.sort(key=lambda m: m.locked_profit_cents, reverse=True)
+        # 4. Detect single-market arbs (rare)
+        single_arbs = self._find_single_arbs(event_markets)
 
         elapsed = (time.perf_counter() - t0) * 1000
 
-        if arb_signals:
+        if event_arbs:
             logger.info(
-                "Scan complete: %d markets, %d arb signals (%.0fms)",
-                len(all_markets), len(arb_signals), elapsed,
+                "Scan: %d event arb(s), %d single arb(s) (%.0fms)",
+                len(event_arbs), len(single_arbs), elapsed,
             )
-            for sig in arb_signals[:5]:
+            for ea in event_arbs[:5]:
                 logger.info(
-                    "  ARB %s  yes_ask=%d  no_ask=%d  sum=%d  profit=%d¢  vol=%d",
-                    sig.ticker, sig.yes_ask, sig.no_ask,
-                    sig.yes_ask + sig.no_ask, sig.locked_profit_cents,
-                    sig.volume_24h,
+                    "  EVENT ARB %s  %s  %d legs  sum=%d  profit=%d¢/set",
+                    ea.event_ticker, ea.arb_type, ea.n_markets, ea.sum_ask, ea.profit_per_set,
                 )
-        else:
-            logger.debug(
-                "Scan complete: %d markets, 0 arb signals (%.0fms)",
-                len(all_markets), elapsed,
-            )
 
         return ScanResult(
-            markets=all_markets,
-            arb_signals=arb_signals,
+            event_arbs=event_arbs,
+            single_arbs=single_arbs,
+            me_events=len(me_events),
+            total_markets=total_mkts,
             elapsed_ms=elapsed,
-            total_scanned=len(all_markets),
         )
 
+    def _fetch_me_events(self) -> list[dict]:
+        """Paginate events and filter mutually-exclusive."""
+        all_events: list[dict] = []
+        cursor = None
+        while True:
+            try:
+                resp = self._client.get_events(status="open", cursor=cursor, limit=200)
+            except Exception as exc:
+                logger.error("Event fetch error: %s", exc)
+                break
+            batch = resp.get("events", [])
+            if not batch:
+                break
+            all_events.extend(batch)
+            cursor = resp.get("cursor")
+            if not cursor:
+                break
+        return [e for e in all_events if e.get("mutually_exclusive")]
+
+    def _fetch_event_markets(self, me_events: list[dict]) -> Dict[str, list[dict]]:
+        """Concurrently fetch markets for each ME event."""
+        result: Dict[str, list[dict]] = {}
+
+        def _fetch_one(et: str) -> Tuple[str, list[dict]]:
+            try:
+                resp = self._client.get_markets(event_ticker=et, limit=200)
+                return et, resp.get("markets", [])
+            except Exception as exc:
+                logger.debug("Failed markets for %s: %s", et, exc)
+                return et, []
+
+        with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as pool:
+            futs = {pool.submit(_fetch_one, e["event_ticker"]): e for e in me_events}
+            for fut in as_completed(futs):
+                et, mkts = fut.result()
+                result[et] = mkts
+
+        return result
+
+    def _find_event_arbs(
+        self, me_events: list[dict], event_markets: Dict[str, list[dict]]
+    ) -> list[EventArbOpportunity]:
+        """Scan ME events for multi-outcome arb."""
+        signals: list[EventArbOpportunity] = []
+
+        for ev in me_events:
+            et = ev["event_ticker"]
+            raw = event_markets.get(et, [])
+            if len(raw) < 2:
+                continue
+
+            parsed = [self._parse_market(m) for m in raw]
+            priced = [m for m in parsed if m and m.yes_ask > 0]
+            if len(priced) < 2:
+                continue
+
+            n = len(priced)
+            fees = n * FEE_PER_CONTRACT
+
+            # BUY ALL YES: cost = sum(yes_ask) + fees, revenue = 100
+            ya_sum = sum(m.yes_ask for m in priced)
+            profit_yes = 100 - ya_sum - fees
+            if profit_yes > 0:
+                signals.append(EventArbOpportunity(
+                    event_ticker=et,
+                    event_title=ev.get("title", "")[:80],
+                    arb_type="buy_all_yes",
+                    n_markets=n,
+                    legs=[(m.ticker, m.yes_ask) for m in priced],
+                    sum_ask=ya_sum,
+                    revenue=100,
+                    fee_total=fees,
+                    profit_per_set=profit_yes,
+                    category=ev.get("category", ""),
+                    collateral_type=ev.get("collateral_return_type", ""),
+                ))
+
+            # BUY ALL NO: cost = sum(no_ask), revenue = (N-1)*100
+            na_sum = sum((100 - m.yes_bid) if m.yes_bid > 0 else 100 for m in priced)
+            no_rev = (n - 1) * 100
+            profit_no = no_rev - na_sum - fees
+            if profit_no > 0:
+                signals.append(EventArbOpportunity(
+                    event_ticker=et,
+                    event_title=ev.get("title", "")[:80],
+                    arb_type="buy_all_no",
+                    n_markets=n,
+                    legs=[(m.ticker, 100 - m.yes_bid) for m in priced],
+                    sum_ask=na_sum,
+                    revenue=no_rev,
+                    fee_total=fees,
+                    profit_per_set=profit_no,
+                    category=ev.get("category", ""),
+                    collateral_type=ev.get("collateral_return_type", ""),
+                ))
+
+        signals.sort(key=lambda s: s.profit_per_set, reverse=True)
+        return signals
+
+    def _find_single_arbs(self, event_markets: Dict[str, list[dict]]) -> list[MarketQuote]:
+        """Single-market YES+NO sum < 100 (rare — identity is enforced)."""
+        signals: list[MarketQuote] = []
+        for mkts in event_markets.values():
+            for raw in mkts:
+                mq = self._parse_market(raw)
+                if mq and mq.is_arb and mq.locked_profit_cents >= self._cfg.min_profit_cents:
+                    signals.append(mq)
+        signals.sort(key=lambda m: m.locked_profit_cents, reverse=True)
+        return signals
+
     def _parse_market(self, m: dict) -> MarketQuote | None:
-        """Parse a raw market dict into a MarketQuote."""
         ticker = m.get("ticker", "")
         if not ticker:
             return None
-
-        # Parse prices — Kalshi provides yes_bid, yes_ask, no_bid, no_ask in cents
-        # or as dollar strings (yes_bid_dollars etc.)
         yes_bid = self._price_cents(m, "yes_bid")
         yes_ask = self._price_cents(m, "yes_ask")
         no_bid  = self._price_cents(m, "no_bid")
         no_ask  = self._price_cents(m, "no_ask")
-
-        # Derive from YES if NO not provided
-        # In Kalshi: YES bid at X = NO ask at (100-X), YES ask at X = NO bid at (100-X)
         if no_bid == 0 and yes_ask > 0:
             no_bid = 100 - yes_ask
         if no_ask == 0 and yes_bid > 0:
             no_ask = 100 - yes_bid
-
         return MarketQuote(
-            ticker        = ticker,
-            event_ticker  = m.get("event_ticker", ""),
-            title         = m.get("title", m.get("subtitle", "")),
-            category      = m.get("category", ""),
-            status        = m.get("status", ""),
-            yes_bid       = yes_bid,
-            yes_ask       = yes_ask,
-            no_bid        = no_bid,
-            no_ask        = no_ask,
-            last_price    = self._price_cents(m, "last_price"),
-            volume_24h    = int(m.get("volume_24h", 0)),
-            open_interest = int(m.get("open_interest", 0)),
-            close_time    = m.get("close_time", ""),
-            result        = m.get("result", ""),
+            ticker=ticker, event_ticker=m.get("event_ticker", ""),
+            title=m.get("title", m.get("subtitle", "")),
+            category=m.get("category", ""),
+            status=m.get("status", ""),
+            yes_bid=yes_bid, yes_ask=yes_ask,
+            no_bid=no_bid, no_ask=no_ask,
+            last_price=self._price_cents(m, "last_price"),
+            volume_24h=int(m.get("volume_24h", 0)),
+            open_interest=int(m.get("open_interest", 0)),
+            close_time=m.get("close_time", ""),
+            result=m.get("result", ""),
         )
 
     @staticmethod
     def _price_cents(m: dict, key: str) -> int:
-        """Extract price in cents — handles both int (cents) and string ($) formats."""
-        # Try cents field first
         val = m.get(key)
         if isinstance(val, (int, float)) and val > 0:
             return int(val)
-        # Try dollar string field
-        dollar_key = key + "_dollars"
-        dval = m.get(dollar_key)
+        dval = m.get(key + "_dollars")
         if dval:
             try:
                 return int(round(float(dval) * 100))

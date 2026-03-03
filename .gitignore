@@ -1,0 +1,8 @@
+.env
+*.key
+*.pem
+__pycache__/
+*.pyc
+results/
+kalshi_arb.log
+.vscode/

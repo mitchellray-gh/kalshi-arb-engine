@@ -1,0 +1,5 @@
+requests>=2.31
+cryptography>=41.0
+websockets>=12.0
+tabulate>=0.9
+python-dotenv>=1.0

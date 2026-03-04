@@ -1,0 +1,315 @@
+
+================================================================================
+  KALSHI ARB SCAN  —  Multi-Outcome + Sum Arbitrage
+  2804 ME events  |  17465 markets  |  18 arb signals  |  699.9s
+================================================================================
+
+  TOTAL LOCKED PROFIT   : 17202¢  ($172.02)
+  Capital required      : 44498¢  ($444.98)
+  Guaranteed ROI        : +38.66%
+
+--------------------------------------------------------------------------------
+  MULTI-OUTCOME EVENT ARBS  (18 signals)
+--------------------------------------------------------------------------------
+╭──────────────────────────────────────────┬─────────────┬────────┬───────────┬──────────────┬───────┬────────┬──────────┬─────────╮
+│ Event                                    │ Strategy    │   Legs │ Sum Ask   │ Profit/set   │   Qty │ Cost   │ Total$   │ ROI     │
+├──────────────────────────────────────────┼─────────────┼────────┼───────────┼──────────────┼───────┼────────┼──────────┼─────────┤
+│ What will be the 51st state in Trump's t │ BUY ALL YES │      7 │ 21¢       │ 65¢          │    71 │ $24.85 │ $46.15   │ +185.7% │
+│ When will the next US recession start?   │ BUY ALL YES │      6 │ 26¢       │ 62¢          │    65 │ $24.70 │ $40.30   │ +163.2% │
+│ Who will the next Pope be?               │ BUY ALL YES │      7 │ 48¢       │ 38¢          │    40 │ $24.80 │ $15.20   │ +61.3%  │
+│ Who will acquire Pinterest this year?    │ BUY ALL YES │      6 │ 53¢       │ 35¢          │    38 │ $24.70 │ $13.30   │ +53.8%  │
+│ #3 song on Spotify in 2026?              │ BUY ALL YES │     13 │ 42¢       │ 32¢          │    36 │ $24.48 │ $11.52   │ +47.1%  │
+│ Who will be the next CEO of X?           │ BUY ALL YES │      8 │ 62¢       │ 22¢          │    32 │ $24.96 │ $7.04    │ +28.2%  │
+│ Billboard 200 #2 on Mar 14, 2026 chart?  │ BUY ALL YES │     10 │ 58¢       │ 22¢          │    32 │ $24.96 │ $7.04    │ +28.2%  │
+│ Who will the FTC go after next?          │ BUY ALL YES │      5 │ 69¢       │ 21¢          │    31 │ $24.49 │ $6.51    │ +26.6%  │
+│ #3 album on Spotify in 2026?             │ BUY ALL YES │      9 │ 62¢       │ 20¢          │    31 │ $24.80 │ $6.20    │ +25.0%  │
+│ #2 Album on Spotify in 2026?             │ BUY ALL YES │     11 │ 63¢       │ 15¢          │    29 │ $24.65 │ $4.35    │ +17.6%  │
+│ Who will win the 2028 London mayoral ele │ BUY ALL YES │      8 │ 72¢       │ 12¢          │    28 │ $24.64 │ $3.36    │ +13.6%  │
+│ #2 Song on Spotify U.S. in 2026?         │ BUY ALL YES │     15 │ 58¢       │ 12¢          │    28 │ $24.64 │ $3.36    │ +13.6%  │
+│ Vermont Democratic Governor nominee?     │ BUY ALL YES │      7 │ 77¢       │ 9¢           │    27 │ $24.57 │ $2.43    │ +9.9%   │
+│ #3 Album on Spotify U.S. in 2026?        │ BUY ALL YES │     11 │ 70¢       │ 8¢           │    27 │ $24.84 │ $2.16    │ +8.7%   │
+│ Top Song on Spotify U.S in 2026?         │ BUY ALL YES │     17 │ 60¢       │ 6¢           │    26 │ $24.44 │ $1.56    │ +6.4%   │
+│ #2 Song on Spotify in 2026?              │ BUY ALL YES │     12 │ 72¢       │ 4¢           │    26 │ $24.96 │ $1.04    │ +4.2%   │
+│ Who will win the next Georgian parliamen │ BUY ALL YES │      2 │ 95¢       │ 1¢           │    25 │ $24.75 │ $0.25    │ +1.0%   │
+│ Who will win the next Taiwanese presiden │ BUY ALL YES │      3 │ 93¢       │ 1¢           │    25 │ $24.75 │ $0.25    │ +1.0%   │
+╰──────────────────────────────────────────┴─────────────┴────────┴───────────┴──────────────┴───────┴────────┴──────────┴─────────╯
+
+  KXSTATE51-29  [MECNET]:
+    YES KXSTATE51-29-CO  @ 1¢
+    YES KXSTATE51-29-VE  @ 2¢
+    YES KXSTATE51-29-DC  @ 2¢
+    YES KXSTATE51-29-GU  @ 2¢
+    YES KXSTATE51-29-GL  @ 5¢
+    YES KXSTATE51-29-PR  @ 6¢
+    YES KXSTATE51-29-CA  @ 3¢
+
+  KXNBERRECESSQ  [MECNET]:
+    YES KXNBERRECESSQ-Q4-2025  @ 6¢
+    YES KXNBERRECESSQ-Q1-2026  @ 10¢
+    YES KXNBERRECESSQ-Q2-2025  @ 2¢
+    YES KXNBERRECESSQ-Q3-2025  @ 5¢
+    YES KXNBERRECESSQ-Q4-2024  @ 2¢
+    YES KXNBERRECESSQ-Q1-2025  @ 1¢
+
+  KXNEWPOPE-70  [MECNET]:
+    YES KXNEWPOPE-70-PERD  @ 5¢
+    YES KXNEWPOPE-70-AARB  @ 5¢
+    YES KXNEWPOPE-70-FAMB  @ 6¢
+    YES KXNEWPOPE-70-PPAR  @ 9¢
+    YES KXNEWPOPE-70-MZUP  @ 8¢
+    YES KXNEWPOPE-70-LANT  @ 8¢
+    YES KXNEWPOPE-70-PPIZ  @ 7¢
+
+  KXACQUANNOUNCEPINS-27JAN01  [MECNET]:
+    YES KXACQUANNOUNCEPINS-27JAN01-METAPINT  @ 8¢
+    YES KXACQUANNOUNCEPINS-27JAN01-GOOGPINT  @ 6¢
+    YES KXACQUANNOUNCEPINS-27JAN01-AMAZPINT  @ 13¢
+    YES KXACQUANNOUNCEPINS-27JAN01-OPENPINT  @ 11¢
+    YES KXACQUANNOUNCEPINS-27JAN01-MICRPINT  @ 8¢
+    YES KXACQUANNOUNCEPINS-27JAN01-PAYPPINT  @ 7¢
+
+  KXTOPSONGTHIRD-26  [MECNET]:
+    YES KXTOPSONGTHIRD-26-GOL  @ 6¢
+    YES KXTOPSONGTHIRD-26-END  @ 13¢
+    YES KXTOPSONGTHIRD-26-YOU  @ 1¢
+    YES KXTOPSONGTHIRD-26-DTMF  @ 4¢
+    YES KXTOPSONGTHIRD-26-MAN  @ 1¢
+    YES KXTOPSONGTHIRD-26-ORD  @ 1¢
+    YES KXTOPSONGTHIRD-26-SOD  @ 3¢
+    YES KXTOPSONGTHIRD-26-BAC  @ 1¢
+    YES KXTOPSONGTHIRD-26-DON  @ 2¢
+    YES KXTOPSONGTHIRD-26-APT  @ 1¢
+    YES KXTOPSONGTHIRD-26-LUT  @ 4¢
+    YES KXTOPSONGTHIRD-26-BIR  @ 4¢
+    YES KXTOPSONGTHIRD-26-DIE  @ 1¢
+
+  KXNEWROLEX-27JAN  [MECNET]:
+    YES KXNEWROLEX-27JAN-NIKI  @ 24¢
+    YES KXNEWROLEX-27JAN-SRIR  @ 7¢
+    YES KXNEWROLEX-27JAN-ELON  @ 19¢
+    YES KXNEWROLEX-27JAN-JIMM  @ 1¢
+    YES KXNEWROLEX-27JAN-MAHM  @ 5¢
+    YES KXNEWROLEX-27JAN-JACK  @ 3¢
+    YES KXNEWROLEX-27JAN-GROK  @ 2¢
+    YES KXNEWROLEX-27JAN-SAM  @ 1¢
+
+  KXBILLBOARDRUNNERUPALBUM-26MAR14  [MECNET]:
+    YES KXBILLBOARDRUNNERUPALBUM-26MAR14-KPO  @ 1¢
+    YES KXBILLBOARDRUNNERUPALBUM-26MAR14-ICO  @ 1¢
+    YES KXBILLBOARDRUNNERUPALBUM-26MAR14-IMT  @ 31¢
+    YES KXBILLBOARDRUNNERUPALBUM-26MAR14-DEB  @ 19¢
+    YES KXBILLBOARDRUNNERUPALBUM-26MAR14-THEL  @ 1¢
+    YES KXBILLBOARDRUNNERUPALBUM-26MAR14-UNV  @ 1¢
+    YES KXBILLBOARDRUNNERUPALBUM-26MAR14-OCT  @ 1¢
+    YES KXBILLBOARDRUNNERUPALBUM-26MAR14-THE  @ 1¢
+    YES KXBILLBOARDRUNNERUPALBUM-26MAR14-WUT  @ 1¢
+    YES KXBILLBOARDRUNNERUPALBUM-26MAR14-THEA  @ 1¢
+
+  KXFTCNEXT-27  [MECNET]:
+    YES KXFTCNEXT-27-META  @ 13¢
+    YES KXFTCNEXT-27-GOOG  @ 14¢
+    YES KXFTCNEXT-27-TSLA  @ 13¢
+    YES KXFTCNEXT-27-AMZN  @ 14¢
+    YES KXFTCNEXT-27-MFST  @ 15¢
+
+  KXTOPALBUMTHIRD-26  [MECNET]:
+    YES KXTOPALBUMTHIRD-26-TAY  @ 17¢
+    YES KXTOPALBUMTHIRD-26-KPO  @ 9¢
+    YES KXTOPALBUMTHIRD-26-GNX  @ 3¢
+    YES KXTOPALBUMTHIRD-26-TAT  @ 3¢
+    YES KXTOPALBUMTHIRD-26-MOR  @ 4¢
+    YES KXTOPALBUMTHIRD-26-DIN  @ 6¢
+    YES KXTOPALBUMTHIRD-26-SAB  @ 3¢
+    YES KXTOPALBUMTHIRD-26-BIL  @ 2¢
+    YES KXTOPALBUMTHIRD-26-BAD  @ 15¢
+
+  KXTOPALBUMSPOTIFYRUNNERUP-26  [MECNET]:
+    YES KXTOPALBUMSPOTIFYRUNNERUP-26-DIN  @ 7¢
+    YES KXTOPALBUMSPOTIFYRUNNERUP-26-DEB  @ 14¢
+    YES KXTOPALBUMSPOTIFYRUNNERUP-26-KPO  @ 15¢
+    YES KXTOPALBUMSPOTIFYRUNNERUP-26-MAY  @ 3¢
+    YES KXTOPALBUMSPOTIFYRUNNERUP-26-HIT  @ 3¢
+    YES KXTOPALBUMSPOTIFYRUNNERUP-26-YOU  @ 4¢
+    YES KXTOPALBUMSPOTIFYRUNNERUP-26-SOS  @ 3¢
+    YES KXTOPALBUMSPOTIFYRUNNERUP-26-SHO  @ 4¢
+    YES KXTOPALBUMSPOTIFYRUNNERUP-26-UNV  @ 2¢
+    YES KXTOPALBUMSPOTIFYRUNNERUP-26-ITP  @ 5¢
+    YES KXTOPALBUMSPOTIFYRUNNERUP-26-GNX  @ 3¢
+
+  KXLONDONMAYOR-28MAY01  [MECNET]:
+    YES KXLONDONMAYOR-28MAY01-GGOU  @ 4¢
+    YES KXLONDONMAYOR-28MAY01-RALL  @ 5¢
+    YES KXLONDONMAYOR-28MAY01-ZPOL  @ 1¢
+    YES KXLONDONMAYOR-28MAY01-SKHA  @ 27¢
+    YES KXLONDONMAYOR-28MAY01-DLAM  @ 1¢
+    YES KXLONDONMAYOR-28MAY01-JCLE  @ 6¢
+    YES KXLONDONMAYOR-28MAY01-LCUN  @ 23¢
+    YES KXLONDONMAYOR-28MAY01-MCOB  @ 5¢
+
+  KXTOPSONGRUNNERUPUSA-26  [MECNET]:
+    YES KXTOPSONGRUNNERUPUSA-26-DON  @ 1¢
+    YES KXTOPSONGRUNNERUPUSA-26-MAN  @ 1¢
+    YES KXTOPSONGRUNNERUPUSA-26-ORD  @ 4¢
+    YES KXTOPSONGRUNNERUPUSA-26-SOD  @ 1¢
+    YES KXTOPSONGRUNNERUPUSA-26-BIR  @ 1¢
+    YES KXTOPSONGRUNNERUPUSA-26-END  @ 11¢
+    YES KXTOPSONGRUNNERUPUSA-26-LUT  @ 3¢
+    YES KXTOPSONGRUNNERUPUSA-26-FAT  @ 14¢
+    YES KXTOPSONGRUNNERUPUSA-26-BAC  @ 1¢
+    YES KXTOPSONGRUNNERUPUSA-26-GOL  @ 10¢
+    YES KXTOPSONGRUNNERUPUSA-26-DIE  @ 3¢
+    YES KXTOPSONGRUNNERUPUSA-26-YOU  @ 1¢
+    YES KXTOPSONGRUNNERUPUSA-26-TIM  @ 3¢
+    YES KXTOPSONGRUNNERUPUSA-26-APT  @ 1¢
+    YES KXTOPSONGRUNNERUPUSA-26-DTMF  @ 3¢
+
+  KXGOVVTNOMD-26  [MECNET]:
+    YES KXGOVVTNOMD-26-ECHA  @ 3¢
+    YES KXGOVVTNOMD-26-CCLA  @ 36¢
+    YES KXGOVVTNOMD-26-MPIE  @ 26¢
+    YES KXGOVVTNOMD-26-PBAR  @ 3¢
+    YES KXGOVVTNOMD-26-BBAL  @ 3¢
+    YES KXGOVVTNOMD-26-DZUC  @ 3¢
+    YES KXGOVVTNOMD-26-JKRO  @ 3¢
+
+  KXTOPALBUMTHIRDUSA-26  [MECNET]:
+    YES KXTOPALBUMTHIRDUSA-26-OLI  @ 9¢
+    YES KXTOPALBUMTHIRDUSA-26-GNX  @ 5¢
+    YES KXTOPALBUMTHIRDUSA-26-MOR  @ 5¢
+    YES KXTOPALBUMTHIRDUSA-26-HIT  @ 5¢
+    YES KXTOPALBUMTHIRDUSA-26-KPO  @ 5¢
+    YES KXTOPALBUMTHIRDUSA-26-ZAC  @ 8¢
+    YES KXTOPALBUMTHIRDUSA-26-TAY  @ 12¢
+    YES KXTOPALBUMTHIRDUSA-26-SAB  @ 6¢
+    YES KXTOPALBUMTHIRDUSA-26-SHO  @ 5¢
+    YES KXTOPALBUMTHIRDUSA-26-TAT  @ 5¢
+    YES KXTOPALBUMTHIRDUSA-26-BAD  @ 5¢
+
+  KXTOPSONGSPOTIFYUSA-26  [MECNET]:
+    YES KXTOPSONGSPOTIFYUSA-26-DTMF  @ 26¢
+    YES KXTOPSONGSPOTIFYUSA-26-DON  @ 1¢
+    YES KXTOPSONGSPOTIFYUSA-26-FAT  @ 9¢
+    YES KXTOPSONGSPOTIFYUSA-26-SOD  @ 1¢
+    YES KXTOPSONGSPOTIFYUSA-26-BIR  @ 1¢
+    YES KXTOPSONGSPOTIFYUSA-26-HAR  @ 3¢
+    YES KXTOPSONGSPOTIFYUSA-26-APT  @ 1¢
+    YES KXTOPSONGSPOTIFYUSA-26-MANI  @ 3¢
+    YES KXTOPSONGSPOTIFYUSA-26-DIE  @ 2¢
+    YES KXTOPSONGSPOTIFYUSA-26-BAC  @ 1¢
+    YES KXTOPSONGSPOTIFYUSA-26-LUT  @ 2¢
+    YES KXTOPSONGSPOTIFYUSA-26-TIM  @ 1¢
+    YES KXTOPSONGSPOTIFYUSA-26-YOU  @ 1¢
+    YES KXTOPSONGSPOTIFYUSA-26-MAN  @ 1¢
+    YES KXTOPSONGSPOTIFYUSA-26-GOL  @ 3¢
+    YES KXTOPSONGSPOTIFYUSA-26-ORD  @ 1¢
+    YES KXTOPSONGSPOTIFYUSA-26-END  @ 3¢
+
+  KXTOPSONGSPOTIFYRUNNERUP-26  [MECNET]:
+    YES KXTOPSONGSPOTIFYRUNNERUP-26-GOL  @ 8¢
+    YES KXTOPSONGSPOTIFYRUNNERUP-26-DIE  @ 2¢
+    YES KXTOPSONGSPOTIFYRUNNERUP-26-APT  @ 2¢
+    YES KXTOPSONGSPOTIFYRUNNERUP-26-BIR  @ 6¢
+    YES KXTOPSONGSPOTIFYRUNNERUP-26-END  @ 22¢
+    YES KXTOPSONGSPOTIFYRUNNERUP-26-YOU  @ 4¢
+    YES KXTOPSONGSPOTIFYRUNNERUP-26-ORD  @ 2¢
+    YES KXTOPSONGSPOTIFYRUNNERUP-26-DON  @ 4¢
+    YES KXTOPSONGSPOTIFYRUNNERUP-26-BAC  @ 4¢
+    YES KXTOPSONGSPOTIFYRUNNERUP-26-MAN  @ 5¢
+    YES KXTOPSONGSPOTIFYRUNNERUP-26-SOD  @ 4¢
+    YES KXTOPSONGSPOTIFYRUNNERUP-26-DTMF  @ 9¢
+
+  KXGEORGIAPARLI-28  [MECNET]:
+    YES KXGEORGIAPARLI-28-UNM  @ 23¢
+    YES KXGEORGIAPARLI-28-GD  @ 72¢
+
+  KXPRESTAIWAN-28  [MECNET]:
+    YES KXPRESTAIWAN-28-TGOU  @ 12¢
+    YES KXPRESTAIWAN-28-WLAI  @ 66¢
+    YES KXPRESTAIWAN-28-HYUI  @ 15¢
+
+--------------------------------------------------------------------------------
+  EXPLOIT VECTORS:
+  [1] BUY-ALL-YES: ME event sum(yes_ask) < 100¢ → one side must win → profit
+  [2] BUY-ALL-NO:  ME event sum(yes_bid) > 100¢ → sell all YES   → profit
+  [3] SINGLE SUM:  Individual market yes_ask + no_ask < 100¢         (rare)
+  Only risk: VOID resolution → fees lost, principal refunded.
+--------------------------------------------------------------------------------
+
+
+================================================================================
+  DAILY PROFIT SIMULATION  —  Non-Stop Kalshi Arb Engine
+  18 arb types  |  500 trials  |  30 days each
+  Starting capital  : $500.00
+  Scans/day         : 96  (every 15 min)
+  Arb hit rate      : 35% of scans find an arb
+  Avg settle time   : 72h  (3.0 days)
+  Void probability  : 3.0%
+================================================================================
+
+  ─── Per-Day Averages ─────────────────────────────────────────────
+  Mean daily P&L    : +11,751¢  ($+117.51)
+  Mean daily ROI    : +23.50% on $500.00 capital
+
+  ─── Projections (at mean daily rate) ─────────────────────────────
+  Per WEEK          : $+822.55
+  Per MONTH (30d)   : $+3,525.22
+  Per YEAR (365d)   : $+42,890.22
+  Annualized ROI    : +8,578% on $500.00
+
+  ─── 30-Day Total P&L Distribution (500 trials) ────────────
+  Mean              : +352,522¢  ($+3,525.22)  ±78,310¢
+  Median            : +348,155¢  ($+3,481.55)
+  Best trial        : +601,961¢  ($+6,019.61)
+  Worst trial       : +168,227¢  ($+1,682.27)
+  P5  (bad)         : +226,106¢  ($+2,261.06)
+  P25               : +298,628¢  ($+2,986.28)
+  P75               : +406,422¢  ($+4,064.22)
+  P95 (good)        : +489,008¢  ($+4,890.08)
+  Probability > $0  : 100.0%
+
+  ─── 30-Day P&L Histogram ────────────────────────────────────
+  $ +1682.27 │██                            │    5
+  $ +1953.35 │██████                        │   14
+  $ +2224.44 │████████████                  │   28
+  $ +2495.52 │█████████████████             │   40
+  $ +2766.61 │███████████████████████       │   53
+  $ +3037.69 │█████████████████████████████ │   66
+  $ +3308.77 │██████████████████████████████│   68 ← median
+  $ +3579.86 │███████████████████████       │   53
+  $ +3850.94 │█████████████████████████████ │   66
+  $ +4122.02 │████████████████              │   38
+  $ +4393.11 │████████████                  │   28
+  $ +4664.19 │████████                      │   19
+  $ +4935.27 │█████                         │   13
+  $ +5206.36 │███                           │    7
+  $ +5477.44 │                              │    1
+  $ +5748.53 │                              │    1
+
+  ─── Daily Cumulative P&L (avg across 500 trials) ──────────
+  Day   1 : $    +0.00  
+  Day   3 : $    +0.00  
+  Day   5 : $  +125.96  █
+  Day   7 : $  +169.61  █
+  Day   9 : $  +294.94  ██
+  Day  11 : $  +397.56  ███
+  Day  13 : $  +520.60  ████
+  Day  15 : $  +681.85  █████
+  Day  17 : $  +833.49  ███████
+  Day  19 : $ +1046.18  ████████
+  Day  21 : $ +1250.06  ██████████
+  Day  23 : $ +1510.20  ████████████
+  Day  25 : $ +1797.83  ███████████████
+  Day  27 : $ +2128.01  ██████████████████
+  Day  29 : $ +2504.42  █████████████████████
+  Day  30 : $ +3525.22  ██████████████████████████████
+
+--------------------------------------------------------------------------------
+  ASSUMPTIONS:
+  • Arb pool based on LIVE snapshot (18 opportunities)
+  • 35% of scans find actionable arb (conservative — real may be higher)
+  • Positions settle in ~72h avg, freeing capital for reuse
+  • 3% void rate (event cancelled — fees lost, principal refunded)
+  • Max 100 contracts per arb execution
+  • Does NOT account for market impact / liquidity depletion
+--------------------------------------------------------------------------------
+

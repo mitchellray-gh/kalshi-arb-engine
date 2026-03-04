@@ -38,6 +38,17 @@ class Config:
     # Liquidity requirements
     require_liquid_legs: bool = True      # ONLY enter arbs where ALL legs have bids
 
+    # Market-making (spread capture)
+    mm_enabled:         bool  = True      # enable spread-capture market making
+    mm_min_spread:      int   = 2         # min spread (cents) to target
+    mm_min_volume:      int   = 100       # min 24h volume for target
+    mm_buy_timeout:     int   = 120       # seconds before cancelling unfilled buy
+    mm_stop_loss:       int   = 5         # max loss per contract before emergency sell
+    mm_max_per_market:  int   = 30        # max % of balance per market
+    mm_max_total_exposure: int = 80       # max % of balance total exposure
+    mm_check_interval:  int   = 5         # seconds between fill checks
+    mm_scan_interval:   int   = 60        # seconds between full spread scans
+
     # Legacy aliases (for backward compat)
     take_profit_cents:  int   = 1         # mapped to min_scalp_cents
 
@@ -99,6 +110,15 @@ def load_config() -> Config:
         profit_check_seconds = int(os.getenv("PROFIT_CHECK_SECONDS", "5")),
         take_profit_cents  = int(os.getenv("TAKE_PROFIT_CENTS", "1")),
         require_liquid_legs = os.getenv("REQUIRE_LIQUID_LEGS", "true").lower() in ("true", "1", "yes"),
+        mm_enabled         = os.getenv("MM_ENABLED", "true").lower() in ("true", "1", "yes"),
+        mm_min_spread      = int(os.getenv("MM_MIN_SPREAD", "2")),
+        mm_min_volume      = int(os.getenv("MM_MIN_VOLUME", "100")),
+        mm_buy_timeout     = int(os.getenv("MM_BUY_TIMEOUT", "120")),
+        mm_stop_loss       = int(os.getenv("MM_STOP_LOSS", "5")),
+        mm_max_per_market  = int(os.getenv("MM_MAX_PER_MARKET", "30")),
+        mm_max_total_exposure = int(os.getenv("MM_MAX_TOTAL_EXPOSURE", "80")),
+        mm_check_interval  = int(os.getenv("MM_CHECK_INTERVAL", "5")),
+        mm_scan_interval   = int(os.getenv("MM_SCAN_INTERVAL", "60")),
         dry_run            = os.getenv("DRY_RUN", "true").lower() in ("true", "1", "yes"),
         log_level          = os.getenv("LOG_LEVEL", "INFO"),
         log_file           = os.getenv("LOG_FILE", "kalshi_arb.log"),

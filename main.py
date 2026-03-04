@@ -1,22 +1,26 @@
 """
-main.py — Kalshi YES+NO Sum Arbitrage Engine
-─────────────────────────────────────────────
+main.py - Kalshi Daily Profit Engine
+-------------------------------------
 Usage:
-  python main.py                          # start live arb engine loop (reads .env)
-  python main.py --scan                   # one-shot scan, print arb signals, exit
-  python main.py --estimate               # estimate profit from live market data (no auth)
-  python main.py --sim-returns            # Monte Carlo simulate returns (no auth)
-  python main.py --sim-returns --trials 5000 --seed 42  # reproducible simulation
-  python main.py --report                 # print P&L report from results/positions.json
+  python main.py                          # start dual-strategy engine (MM + arb)
+  python main.py --scan                   # one-shot arb scan, print signals, exit
+  python main.py --spread-scan            # one-shot spread scan, show MM targets
+  python main.py --mm-status              # show market-maker session stats
+  python main.py --estimate               # estimate profit from live market data
+  python main.py --sim-returns            # Monte Carlo simulate returns
+  python main.py --report                 # print P&L report
   python main.py --balance                # show account balance
+  python main.py --positions              # show live positions with current P&L
   python main.py --dry-run                # force DRY_RUN=true for this session
   python main.py --env prod               # use production API (default: demo)
-  python main.py --help                   # show this help
 
-Strategy:
-  BUY YES + BUY NO on any market where yes_ask + no_ask + fees < 100¢
-  Exactly one side ALWAYS pays 100¢ at settlement → guaranteed profit.
-  Only risk: VOID resolution (event cancelled) → fees lost, principal refunded.
+Strategies:
+  1. SPREAD CAPTURE (primary): Market-make on high-volume sports markets.
+     Place maker limit buys (0c fee), sell at higher price (0c fee).
+     Capture 1-2c per round-trip. Daily profit from same-day settlements.
+
+  2. MULTI-OUTCOME ARB (secondary): BUY ALL YES/NO on ME events where
+     sum(asks) + fees < 100c. Guaranteed profit at settlement.
 """
 from __future__ import annotations
 
@@ -34,12 +38,18 @@ from engine.logger_setup import setup_logging
 
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="Kalshi YES+NO sum arbitrage engine",
+        description="Kalshi Daily Profit Engine (spread capture + arb)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
+    # Strategy commands
     p.add_argument("--scan",         action="store_true",
-                   help="One-shot scan for arb opportunities, print results, exit.")
+                   help="One-shot arb scan, print signals, exit.")
+    p.add_argument("--spread-scan",  action="store_true",
+                   help="One-shot spread scan, show market-making targets.")
+    p.add_argument("--mm-status",    action="store_true",
+                   help="Show market-maker session stats and active positions.")
+    # Analysis
     p.add_argument("--estimate",     action="store_true",
                    help="Estimate profit from live market data (no auth required).")
     p.add_argument("--sim-returns",  action="store_true",
@@ -50,11 +60,13 @@ def _parse_args() -> argparse.Namespace:
                    help="Show Kalshi account balance.")
     p.add_argument("--positions",    action="store_true",
                    help="Show live positions with current P&L.")
+    # Config overrides
     p.add_argument("--dry-run",      action="store_true", default=None,
                    help="Override DRY_RUN=true (no real orders).")
     p.add_argument("--env",          type=str, default=None,
                    choices=["demo", "prod"],
                    help="API environment (default: from .env or demo).")
+    # Simulation params
     p.add_argument("--sim-daily",    action="store_true",
                    help="Simulate daily P&L if engine ran non-stop (uses live data).")
     p.add_argument("--days",         type=int, default=30,
@@ -249,6 +261,81 @@ def cmd_run(cfg) -> None:
     TradingEngine(cfg).run()
 
 
+def cmd_spread_scan(cfg) -> None:
+    """One-shot spread scan: find market-making targets."""
+    cfg.validate()
+    from engine.client import KalshiClient
+    from engine.spread_scanner import SpreadScanner
+
+    client = KalshiClient(cfg)
+    scanner = SpreadScanner(client, cfg)
+    result = scanner.scan()
+
+    print(f"\n  Scanned {result.total_scanned} markets  |  "
+          f"{result.two_sided} two-sided  |  "
+          f"{result.elapsed_ms:.0f}ms")
+    print(f"  Spread targets found: {len(result.targets)}\n")
+
+    if not result.targets:
+        print("  No spread targets found. Markets may be too tight or volume too low.")
+        print(f"  Config: min_spread={cfg.mm_min_spread}c  min_volume={cfg.mm_min_volume}\n")
+        return
+
+    try:
+        from tabulate import tabulate
+        tab = True
+    except ImportError:
+        tab = False
+
+    rows = []
+    for t in result.targets[:30]:
+        rows.append([
+            t.ticker[:35],
+            f"{t.yes_bid}c",
+            f"{t.yes_ask}c",
+            f"{t.spread}c",
+            f"{t.buy_price}c",
+            f"{t.sell_price}c",
+            f"{t.profit_per_rt}c",
+            f"{t.volume_24h:,}",
+            f"{t.score:.0f}",
+        ])
+
+    hdrs = ["Market", "Bid", "Ask", "Spread", "Buy@", "Sell@", "Profit/RT", "Vol24h", "Score"]
+    if tab:
+        print(tabulate(rows, headers=hdrs, tablefmt="rounded_outline"))
+    else:
+        print("  ".join(hdrs))
+        for r in rows:
+            print("  " + "  ".join(str(c) for c in r))
+    print(f"\n  Top target: {result.targets[0].ticker}")
+    print(f"    Buy at {result.targets[0].buy_price}c (maker, 0c fee) -> "
+          f"Sell at {result.targets[0].sell_price}c (maker, 0c fee) = "
+          f"{result.targets[0].profit_per_rt}c profit/contract\n")
+
+
+def cmd_mm_status(cfg) -> None:
+    """Show market-maker status (requires running engine instance or saved state)."""
+    print("\n  Market Maker Status")
+    print("  " + "-" * 40)
+    print("  The market maker runs as part of the engine.")
+    print("  Start the engine with: python main.py --env prod")
+    print("  Stats are displayed live during engine operation.")
+    print()
+    # Show config for reference
+    print("  Current MM Config:")
+    print(f"    mm_enabled:       {getattr(cfg, 'mm_enabled', True)}")
+    print(f"    mm_min_spread:    {cfg.mm_min_spread}c")
+    print(f"    mm_min_volume:    {cfg.mm_min_volume}")
+    print(f"    mm_buy_timeout:   {cfg.mm_buy_timeout}s")
+    print(f"    mm_stop_loss:     {cfg.mm_stop_loss}c")
+    print(f"    mm_max_per_market:{cfg.mm_max_per_market}%")
+    print(f"    mm_max_total:     {cfg.mm_max_total_exposure}%")
+    print(f"    mm_check_interval:{cfg.mm_check_interval}s")
+    print(f"    mm_scan_interval: {cfg.mm_scan_interval}s")
+    print()
+
+
 # ── Entrypoint ────────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -273,6 +360,10 @@ def main() -> None:
             cmd_sim_returns(cfg, n_trials=args.trials, seed=args.seed)
         elif args.scan:
             cmd_scan(cfg)
+        elif args.spread_scan:
+            cmd_spread_scan(cfg)
+        elif args.mm_status:
+            cmd_mm_status(cfg)
         elif args.report:
             cmd_report()
         elif args.balance:

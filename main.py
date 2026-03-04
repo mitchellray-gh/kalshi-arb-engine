@@ -175,10 +175,10 @@ def cmd_balance(cfg) -> None:
 
 
 def cmd_positions(cfg) -> None:
-    """Show live positions with current market prices and P&L."""
+    """Show live positions with current market prices, P&L, and scalp readiness."""
     cfg.validate()
     from engine.client import KalshiClient
-    from engine.profit_taker import ProfitTaker
+    from engine.profit_taker import ProfitTaker, ROUND_TRIP_FEE
     data_client = KalshiClient(cfg)
     pt = ProfitTaker(client=None, data_client=data_client, cfg=cfg)
     snapshots = pt.get_position_report()
@@ -196,21 +196,32 @@ def cmd_positions(cfg) -> None:
     rows = []
     total_cost = 0
     total_pnl = 0
+    scalp_ready = 0
+    min_scalp = getattr(cfg, 'min_scalp_cents', 1)
+
     for s in snapshots:
-        cost_total = s.cost_basis_cents * s.quantity
+        cost_total = (s.cost_basis_cents + 2) * s.quantity  # include buy fee
         total_cost += cost_total
         total_pnl += s.pnl_if_sell
+
+        # Check if scalp-ready
+        net = s.net_per_contract
+        ready = "SCALP" if net >= min_scalp else ("HOLD" if net > -ROUND_TRIP_FEE else "LOSS")
+        if net >= min_scalp:
+            scalp_ready += 1
+
         rows.append([
             s.ticker[:35],
             s.side.upper(),
             s.quantity,
             f"{s.cost_basis_cents}¢",
             f"{s.current_bid}¢",
-            f"{s.pnl_if_sell:+d}¢",
+            f"{net:+d}¢",
             f"{s.pnl_pct:+.0%}",
+            ready,
         ])
 
-    hdrs = ["Market", "Side", "Qty", "Cost/ea", "Bid", "P&L", "P&L %"]
+    hdrs = ["Market", "Side", "Qty", "Cost", "Bid", "Net/ea", "ROI", "Status"]
     print()
     if tab:
         print(tabulate(rows, headers=hdrs, tablefmt="rounded_outline"))
@@ -219,9 +230,12 @@ def cmd_positions(cfg) -> None:
         for r in rows:
             print("  " + "  ".join(str(c) for c in r))
 
-    print(f"\n  Total cost: {total_cost}¢ (${total_cost/100:.2f})")
+    print(f"\n  Total invested:        {total_cost}¢ (${total_cost/100:.2f})")
     print(f"  Total P&L if sold now: {total_pnl:+d}¢ (${total_pnl/100:+.2f})")
-    print(f"  Take profit threshold: +{cfg.take_profit_cents}¢/contract")
+    print(f"  Scalp-ready positions: {scalp_ready}/{len(snapshots)}")
+    print(f"  Min scalp threshold:   {min_scalp}¢ net profit/contract")
+    print(f"  Round-trip fee:        {ROUND_TRIP_FEE}¢ (2¢ buy + 2¢ sell)")
+    print(f"  Trail stop distance:   {getattr(cfg, 'trail_stop_cents', 3)}¢")
     print(f"  Stop loss threshold:   {cfg.stop_loss_pct:.0%} of cost\n")
 
 

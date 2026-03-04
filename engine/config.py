@@ -21,17 +21,22 @@ class Config:
     max_open_positions: int   = 20
 
     # Arb thresholds
-    min_profit_cents:   int   = 5         # min locked profit per pair (cents)
-    min_volume_24h:     int   = 50
+    min_profit_cents:   int   = 3         # min locked profit per set (lowered for velocity)
+    min_volume_24h:     int   = 0         # accept any liquidity
 
     # Scanning
-    scan_interval_seconds: int = 15
+    scan_interval_seconds: int = 10       # full arb scan interval (was 15)
     scan_categories:    List[str] = field(default_factory=lambda: ["all"])
 
-    # Profit taking
-    take_profit_cents:  int   = 4         # min profit/contract to trigger sell
+    # Rapid profit-taking
+    min_scalp_cents:    int   = 1         # min NET profit/contract to scalp (after 4¢ fees)
+    trail_stop_cents:   int   = 3         # sell if bid drops this much from peak
     stop_loss_pct:      float = 0.50      # sell if value drops below this % of cost
-    max_hold_days:      int   = 30        # force sell after N days
+    max_hold_days:      int   = 14        # force sell after N days (was 30)
+    profit_check_seconds: int = 5         # fast cycle for profit checks
+
+    # Legacy aliases (for backward compat)
+    take_profit_cents:  int   = 1         # mapped to min_scalp_cents
 
     # Execution
     dry_run:            bool  = True
@@ -80,13 +85,16 @@ def load_config() -> Config:
         max_order_cents    = int(os.getenv("MAX_ORDER_CENTS", "2500")),
         max_contracts      = int(os.getenv("MAX_CONTRACTS", "100")),
         max_open_positions = int(os.getenv("MAX_OPEN_POSITIONS", "20")),
-        min_profit_cents   = int(os.getenv("MIN_PROFIT_CENTS", "5")),
-        min_volume_24h     = int(os.getenv("MIN_VOLUME_24H", "50")),
-        scan_interval_seconds = int(os.getenv("SCAN_INTERVAL_SECONDS", "15")),
+        min_profit_cents   = int(os.getenv("MIN_PROFIT_CENTS", "3")),
+        min_volume_24h     = int(os.getenv("MIN_VOLUME_24H", "0")),
+        scan_interval_seconds = int(os.getenv("SCAN_INTERVAL_SECONDS", "10")),
         scan_categories    = cats,
-        take_profit_cents  = int(os.getenv("TAKE_PROFIT_CENTS", "4")),
+        min_scalp_cents    = int(os.getenv("MIN_SCALP_CENTS", "1")),
+        trail_stop_cents   = int(os.getenv("TRAIL_STOP_CENTS", "3")),
         stop_loss_pct      = float(os.getenv("STOP_LOSS_PCT", "0.50")),
-        max_hold_days      = int(os.getenv("MAX_HOLD_DAYS", "30")),
+        max_hold_days      = int(os.getenv("MAX_HOLD_DAYS", "14")),
+        profit_check_seconds = int(os.getenv("PROFIT_CHECK_SECONDS", "5")),
+        take_profit_cents  = int(os.getenv("TAKE_PROFIT_CENTS", "1")),
         dry_run            = os.getenv("DRY_RUN", "true").lower() in ("true", "1", "yes"),
         log_level          = os.getenv("LOG_LEVEL", "INFO"),
         log_file           = os.getenv("LOG_FILE", "kalshi_arb.log"),

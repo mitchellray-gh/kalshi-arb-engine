@@ -28,6 +28,11 @@ class Config:
     scan_interval_seconds: int = 15
     scan_categories:    List[str] = field(default_factory=lambda: ["all"])
 
+    # Profit taking
+    take_profit_cents:  int   = 4         # min profit/contract to trigger sell
+    stop_loss_pct:      float = 0.50      # sell if value drops below this % of cost
+    max_hold_days:      int   = 30        # force sell after N days
+
     # Execution
     dry_run:            bool  = True
     log_level:          str   = "INFO"
@@ -79,6 +84,9 @@ def load_config() -> Config:
         min_volume_24h     = int(os.getenv("MIN_VOLUME_24H", "50")),
         scan_interval_seconds = int(os.getenv("SCAN_INTERVAL_SECONDS", "15")),
         scan_categories    = cats,
+        take_profit_cents  = int(os.getenv("TAKE_PROFIT_CENTS", "4")),
+        stop_loss_pct      = float(os.getenv("STOP_LOSS_PCT", "0.50")),
+        max_hold_days      = int(os.getenv("MAX_HOLD_DAYS", "30")),
         dry_run            = os.getenv("DRY_RUN", "true").lower() in ("true", "1", "yes"),
         log_level          = os.getenv("LOG_LEVEL", "INFO"),
         log_file           = os.getenv("LOG_FILE", "kalshi_arb.log"),

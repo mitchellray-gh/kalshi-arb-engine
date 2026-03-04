@@ -48,6 +48,8 @@ def _parse_args() -> argparse.Namespace:
                    help="Print P&L report from results/positions.json.")
     p.add_argument("--balance",      action="store_true",
                    help="Show Kalshi account balance.")
+    p.add_argument("--positions",    action="store_true",
+                   help="Show live positions with current P&L.")
     p.add_argument("--dry-run",      action="store_true", default=None,
                    help="Override DRY_RUN=true (no real orders).")
     p.add_argument("--env",          type=str, default=None,
@@ -172,6 +174,57 @@ def cmd_balance(cfg) -> None:
     print(f"  Total          : {balance + portfolio}¢  (${(balance + portfolio)/100:,.2f})\n")
 
 
+def cmd_positions(cfg) -> None:
+    """Show live positions with current market prices and P&L."""
+    cfg.validate()
+    from engine.client import KalshiClient
+    from engine.profit_taker import ProfitTaker
+    data_client = KalshiClient(cfg)
+    pt = ProfitTaker(client=None, data_client=data_client, cfg=cfg)
+    snapshots = pt.get_position_report()
+
+    if not snapshots:
+        print("\n  No open positions.\n")
+        return
+
+    try:
+        from tabulate import tabulate
+        tab = True
+    except ImportError:
+        tab = False
+
+    rows = []
+    total_cost = 0
+    total_pnl = 0
+    for s in snapshots:
+        cost_total = s.cost_basis_cents * s.quantity
+        total_cost += cost_total
+        total_pnl += s.pnl_if_sell
+        rows.append([
+            s.ticker[:35],
+            s.side.upper(),
+            s.quantity,
+            f"{s.cost_basis_cents}¢",
+            f"{s.current_bid}¢",
+            f"{s.pnl_if_sell:+d}¢",
+            f"{s.pnl_pct:+.0%}",
+        ])
+
+    hdrs = ["Market", "Side", "Qty", "Cost/ea", "Bid", "P&L", "P&L %"]
+    print()
+    if tab:
+        print(tabulate(rows, headers=hdrs, tablefmt="rounded_outline"))
+    else:
+        print("  ".join(hdrs))
+        for r in rows:
+            print("  " + "  ".join(str(c) for c in r))
+
+    print(f"\n  Total cost: {total_cost}¢ (${total_cost/100:.2f})")
+    print(f"  Total P&L if sold now: {total_pnl:+d}¢ (${total_pnl/100:+.2f})")
+    print(f"  Take profit threshold: +{cfg.take_profit_cents}¢/contract")
+    print(f"  Stop loss threshold:   {cfg.stop_loss_pct:.0%} of cost\n")
+
+
 def cmd_run(cfg) -> None:
     """Start the live arb engine loop."""
     cfg.validate()
@@ -207,6 +260,8 @@ def main() -> None:
             cmd_report()
         elif args.balance:
             cmd_balance(cfg)
+        elif args.positions:
+            cmd_positions(cfg)
         else:
             cmd_run(cfg)
     except KeyboardInterrupt:

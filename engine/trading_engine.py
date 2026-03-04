@@ -19,6 +19,7 @@ from .client import KalshiClient
 from .config import Config
 from .executor import ArbExecutor, EventArbExecution, SingleArbExecution
 from .positions import ArbPosition, PositionStore
+from .profit_taker import ProfitTaker
 from .scanner import FEE_PER_CONTRACT, FEE_ROUND_TRIP, MarketScanner
 
 logger = logging.getLogger(__name__)
@@ -47,6 +48,14 @@ class TradingEngine:
             self._data_client = KalshiClient(cfg)
             self._scanner = MarketScanner(self._data_client, cfg)
             self._executor = ArbExecutor(self._client, cfg, data_client=self._data_client)
+            self._profit_taker = ProfitTaker(
+                client=self._client,
+                data_client=self._data_client,
+                cfg=cfg,
+                take_profit_cents=cfg.take_profit_cents,
+                stop_loss_pct=cfg.stop_loss_pct,
+                max_hold_days=cfg.max_hold_days,
+            )
 
         self._store = PositionStore()
 
@@ -68,7 +77,9 @@ class TradingEngine:
         print(f"  min_profit={cfg.min_profit_cents}¢  max_order={cfg.max_order_cents}¢  "
               f"max_contracts={cfg.max_contracts}")
         print(f"  scan_interval={cfg.scan_interval_seconds}s")
+        print(f"  take_profit={cfg.take_profit_cents}¢  stop_loss={cfg.stop_loss_pct:.0%}")
         print("  Strategies: BUY-ALL-YES, BUY-ALL-NO (ME events)")
+        print("  Active profit-taking: ENABLED")
         print("=" * 72 + "\n")
 
         while True:
@@ -89,7 +100,10 @@ class TradingEngine:
         ts = datetime.now(timezone.utc).strftime("%H:%M:%S")
         cfg = self._cfg
 
-        # 1. Settle any expired positions
+        # 1. Check profit-taking / stop-loss on existing positions
+        self._run_profit_taker()
+
+        # 2. Settle any expired positions
         self._check_settlements()
 
         # 2. Scan for arbs
@@ -186,3 +200,19 @@ class TradingEngine:
                     logger.info("Position %s settled: %s", pos.ticker, result)
             except Exception as exc:
                 logger.debug("Cannot check settlement for %s: %s", pos.ticker, exc)
+
+    def _run_profit_taker(self) -> None:
+        """Run active profit-taking / stop-loss on open positions."""
+        if not hasattr(self, '_profit_taker') or not self._profit_taker:
+            return
+        try:
+            results = self._profit_taker.check_and_sell()
+            if results:
+                sold = [r for r in results if r.status == "sold"]
+                total_realized = sum(r.realized_pnl for r in sold)
+                if sold:
+                    ts = datetime.now(timezone.utc).strftime("%H:%M:%S")
+                    print(f"  [{ts}] Profit taker: {len(sold)} position(s) sold  |  "
+                          f"realized P&L: {total_realized:+d}¢ (${total_realized/100:+.2f})")
+        except Exception as exc:
+            logger.error("Profit taker error: %s", exc, exc_info=True)

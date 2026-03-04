@@ -290,6 +290,9 @@ def compute_edge(
     ev_cents = noaa_prob * 98 - ask
 
     # Confidence level based on edge magnitude
+    # Backtest showed medium (12-20%) actually has HIGHER avg PnL (+14.4c)
+    # than high (20%+, +9.9c) due to asymmetric payoff on cheaper contracts.
+    # Both are profitable. Low (<12%) was not tested and is excluded.
     if edge >= 0.20:
         confidence = "high"
     elif edge >= 0.12:
@@ -298,6 +301,10 @@ def compute_edge(
         confidence = "low"
 
     if edge < min_edge:
+        return None
+
+    # Backtest: negative EV means even with edge, fees eat the profit
+    if ev_cents < 0:
         return None
 
     me = MarketEdge(

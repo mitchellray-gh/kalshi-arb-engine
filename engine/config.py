@@ -40,10 +40,10 @@ class Config:
 
     # Weather-data trading (NOAA-driven)
     wx_enabled:         bool  = True      # enable weather-data strategy
-    wx_min_edge:        float = 0.08      # minimum edge (0-1) to trade
-    wx_sigma:           float = 2.5       # forecast uncertainty \u00b0F (std dev)
+    wx_min_edge:        float = 0.12      # minimum edge (0-1) — backtest: <12% is "low" conf, unprofitable
+    wx_sigma:           float = 2.5       # forecast uncertainty °F (std dev)
     wx_max_bet_cents:   int   = 500       # max total spend per scan cycle
-    wx_max_contracts:   int   = 10        # max contracts per single trade
+    wx_max_contracts:   int   = 10        # BASE contracts per trade (scaled by edge)
     wx_min_volume:      int   = 10        # min 24h volume to consider
     wx_scan_interval:   int   = 300       # seconds between weather scans
     wx_max_days_out:    int   = 2         # only events closing within N days

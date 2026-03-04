@@ -25,6 +25,12 @@ from .weather_model import MarketEdge, WeatherSignal, compute_edge, parse_kalshi
 
 logger = logging.getLogger(__name__)
 
+# Backtest-driven city tiers (Mar 1-3 2026 data, 500 MC trials)
+# Tier 1: Win rate >= 39%, positive P&L — get 2x+ sizing
+CITY_TIER1 = {"PHIL", "NYC", "LAX", "AUS", "BOS"}
+# Blacklist: Win rate <= 10%, negative P&L — skip entirely
+CITY_BLACKLIST = {"CHI", "DC"}
+
 
 class WeatherTrader:
     """NOAA-data-driven weather contract trader."""
@@ -206,8 +212,8 @@ class WeatherTrader:
                     signal.edges.append(edge)
 
         signal.edges_found = len(signal.edges)
-        # Sort by edge descending (best opportunities first)
-        signal.edges.sort(key=lambda e: e.edge, reverse=True)
+        # Sort by expected value descending (backtest showed EV > edge%)
+        signal.edges.sort(key=lambda e: e.expected_profit_cents, reverse=True)
 
         self._last_signal = signal
         logger.info(
@@ -264,14 +270,31 @@ class WeatherTrader:
             if edge.confidence == "low":
                 continue
 
+            # Backtest-driven city blacklist: CHI (10% WR, -$0.09) and DC (8% WR, -$0.08)
+            if edge.city in CITY_BLACKLIST:
+                logger.debug("Skipping blacklisted city %s: %s", edge.city, edge.ticker)
+                continue
+
             # Calculate order size
             cost_per_contract = edge.market_ask  # cents
             if cost_per_contract <= 0:
                 continue
 
+            # Edge-scaled position sizing (backtest insight: bigger edges = more contracts)
+            if edge.edge >= 0.30:
+                size_mult = 3        # 30%+ edge: 3x base
+            elif edge.edge >= 0.20:
+                size_mult = 2        # 20%+ edge: 2x base
+            else:
+                size_mult = 1        # base size
+
+            # Scale for top-performing cities (PHIL 58% WR, NYC 39%, LAX 40%, AUS 42%)
+            if edge.city in CITY_TIER1:
+                size_mult = max(size_mult, 2)  # at least 2x for tier-1 cities
+
             # How many can we afford?
             can_afford = (budget - spent) // cost_per_contract
-            count = min(max_contracts_per_trade, can_afford)
+            count = min(max_contracts_per_trade * size_mult, can_afford)
             if count <= 0:
                 logger.info("Budget exhausted after $%.2f spent", spent / 100)
                 break

@@ -47,6 +47,10 @@ def _parse_args() -> argparse.Namespace:
                    help="One-shot arb scan, print signals, exit.")
     p.add_argument("--spread-scan",  action="store_true",
                    help="One-shot spread scan, show market-making targets.")
+    p.add_argument("--weather-scan", action="store_true",
+                   help="NOAA weather edge scan (shows edges, no orders).")
+    p.add_argument("--weather-trade", action="store_true",
+                   help="Weather scan + place orders on high-edge contracts.")
     p.add_argument("--mm-status",    action="store_true",
                    help="Show market-maker session stats and active positions.")
     # Analysis
@@ -314,6 +318,41 @@ def cmd_spread_scan(cfg) -> None:
           f"{result.targets[0].profit_per_rt}c profit/contract\n")
 
 
+def cmd_weather_scan(cfg, trade: bool = False) -> None:
+    """Scan weather markets for NOAA-data edges. Optionally place trades."""
+    cfg.validate()
+    from engine.client import KalshiClient
+    from engine.weather_trader import WeatherTrader
+
+    client = KalshiClient(cfg)
+    trader = WeatherTrader(client, cfg)
+
+    print("\n  Fetching NOAA forecasts and scanning Kalshi weather markets...")
+    signal = trader.scan(
+        max_days_out=cfg.wx_max_days_out,
+        sigma=cfg.wx_sigma,
+        min_edge=cfg.wx_min_edge,
+        min_volume=cfg.wx_min_volume,
+    )
+    trader.print_scan_report(signal)
+
+    if trade and signal.edges:
+        dry = cfg.dry_run
+        print(f"  {'[DRY RUN] ' if dry else ''}Executing trades on {len(signal.edges)} edges...\n")
+        orders = trader.execute_trades(
+            signal,
+            max_contracts_per_trade=cfg.wx_max_contracts,
+            max_total_spend_cents=cfg.wx_max_bet_cents,
+            dry_run=dry,
+        )
+        print(f"  Orders placed: {len(orders)}")
+        total_ev = sum(o.get('ev_cents', 0) for o in orders)
+        total_cost = sum(o.get('count', 0) * o.get('price', 0) for o in orders)
+        print(f"  Total cost: ${total_cost/100:.2f}")
+        print(f"  Total expected value: ${total_ev/100:+.2f}")
+        print(f"  Settlement: next day\n")
+
+
 def cmd_mm_status(cfg) -> None:
     """Show market-maker status (requires running engine instance or saved state)."""
     print("\n  Market Maker Status")
@@ -362,6 +401,10 @@ def main() -> None:
             cmd_scan(cfg)
         elif args.spread_scan:
             cmd_spread_scan(cfg)
+        elif args.weather_scan:
+            cmd_weather_scan(cfg, trade=False)
+        elif args.weather_trade:
+            cmd_weather_scan(cfg, trade=True)
         elif args.mm_status:
             cmd_mm_status(cfg)
         elif args.report:

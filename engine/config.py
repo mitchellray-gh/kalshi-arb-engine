@@ -38,6 +38,16 @@ class Config:
     # Liquidity requirements
     require_liquid_legs: bool = True      # ONLY enter arbs where ALL legs have bids
 
+    # Weather-data trading (NOAA-driven)
+    wx_enabled:         bool  = True      # enable weather-data strategy
+    wx_min_edge:        float = 0.08      # minimum edge (0-1) to trade
+    wx_sigma:           float = 2.5       # forecast uncertainty \u00b0F (std dev)
+    wx_max_bet_cents:   int   = 500       # max total spend per scan cycle
+    wx_max_contracts:   int   = 10        # max contracts per single trade
+    wx_min_volume:      int   = 10        # min 24h volume to consider
+    wx_scan_interval:   int   = 300       # seconds between weather scans
+    wx_max_days_out:    int   = 2         # only events closing within N days
+
     # Market-making (spread capture)
     mm_enabled:         bool  = True      # enable spread-capture market making
     mm_min_spread:      int   = 2         # min spread (cents) to target
@@ -110,6 +120,14 @@ def load_config() -> Config:
         profit_check_seconds = int(os.getenv("PROFIT_CHECK_SECONDS", "5")),
         take_profit_cents  = int(os.getenv("TAKE_PROFIT_CENTS", "1")),
         require_liquid_legs = os.getenv("REQUIRE_LIQUID_LEGS", "true").lower() in ("true", "1", "yes"),
+        wx_enabled         = os.getenv("WX_ENABLED", "true").lower() in ("true", "1", "yes"),
+        wx_min_edge        = float(os.getenv("WX_MIN_EDGE", "0.08")),
+        wx_sigma           = float(os.getenv("WX_SIGMA", "2.5")),
+        wx_max_bet_cents   = int(os.getenv("WX_MAX_BET_CENTS", "500")),
+        wx_max_contracts   = int(os.getenv("WX_MAX_CONTRACTS", "10")),
+        wx_min_volume      = int(os.getenv("WX_MIN_VOLUME", "10")),
+        wx_scan_interval   = int(os.getenv("WX_SCAN_INTERVAL", "300")),
+        wx_max_days_out    = int(os.getenv("WX_MAX_DAYS_OUT", "2")),
         mm_enabled         = os.getenv("MM_ENABLED", "true").lower() in ("true", "1", "yes"),
         mm_min_spread      = int(os.getenv("MM_MIN_SPREAD", "2")),
         mm_min_volume      = int(os.getenv("MM_MIN_VOLUME", "100")),

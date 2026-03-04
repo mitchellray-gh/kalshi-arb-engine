@@ -52,6 +52,12 @@ class WeatherTrader:
         now = datetime.now(timezone.utc)
         cutoff = now + timedelta(days=max_days_out)
 
+        # Date strings we care about (e.g., ["26MAR04", "26MAR05"] for 2 days out)
+        valid_dates = set()
+        for d in range(max_days_out + 1):
+            dt = now + timedelta(days=d)
+            valid_dates.add(dt.strftime("%y%b%d").upper())  # e.g., "26MAR04"
+
         weather_events = []
         cursor = None
 
@@ -84,8 +90,11 @@ class WeatherTrader:
                 if prefix not in KALSHI_CITY_MAP:
                     continue
 
-                # Check close date — skip if too far out
-                # Get markets for this event to check close time
+                # Filter by date — skip events beyond max_days_out
+                date_part = parts[1]  # e.g., "26MAR05"
+                if date_part not in valid_dates:
+                    continue
+
                 weather_events.append({
                     "event_ticker": event_ticker,
                     "title": title,
@@ -296,8 +305,8 @@ class WeatherTrader:
             can_afford = (budget - spent) // cost_per_contract
             count = min(max_contracts_per_trade * size_mult, can_afford)
             if count <= 0:
-                logger.info("Budget exhausted after $%.2f spent", spent / 100)
-                break
+                # Don't break — cheaper edges further down may still be affordable
+                continue
 
             total_cost = count * cost_per_contract
             ev_total = count * edge.expected_profit_cents

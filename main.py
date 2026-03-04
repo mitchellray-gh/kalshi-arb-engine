@@ -347,8 +347,8 @@ def cmd_weather_scan(cfg, trade: bool = False) -> None:
         )
         print(f"  Orders placed: {len(orders)}")
         total_ev = sum(o.get('ev_cents', 0) for o in orders)
-        total_cost = sum(o.get('count', 0) * o.get('price', 0) for o in orders)
-        print(f"  Total cost: ${total_cost/100:.2f}")
+        total_cost = sum(o.get('count', 0) * (o.get('price', 0) + 2) for o in orders)
+        print(f"  Total cost (incl 2\u00a2 fee): ${total_cost/100:.2f}")
         print(f"  Total expected value: ${total_ev/100:+.2f}")
         print(f"  Settlement: next day\n")
 

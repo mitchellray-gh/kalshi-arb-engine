@@ -97,6 +97,7 @@ def cmd_scan(cfg) -> None:
     if result.event_arbs:
         rows = []
         for ea in result.event_arbs:
+            liquid = "YES" if ea.is_liquid else f"NO ({ea.dead_legs} dead)"
             rows.append([
                 ea.event_ticker[:30],
                 ea.arb_type.replace("_", " ").upper(),
@@ -104,8 +105,10 @@ def cmd_scan(cfg) -> None:
                 f"{ea.sum_ask}¢",
                 f"{ea.profit_per_set}¢",
                 f"{ea.roi_per_set:+.0%}",
+                f"{ea.exit_recovery_pct:.0f}%",
+                liquid,
             ])
-        hdrs = ["Event", "Strategy", "Legs", "Sum Ask", "Profit/set", "ROI"]
+        hdrs = ["Event", "Strategy", "Legs", "Cost", "Profit", "ROI", "Exit%", "Liquid"]
         if tab:
             print(tabulate(rows, headers=hdrs, tablefmt="rounded_outline"))
         else:

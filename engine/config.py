@@ -35,6 +35,9 @@ class Config:
     max_hold_days:      int   = 14        # force sell after N days (was 30)
     profit_check_seconds: int = 5         # fast cycle for profit checks
 
+    # Liquidity requirements
+    require_liquid_legs: bool = True      # ONLY enter arbs where ALL legs have bids
+
     # Legacy aliases (for backward compat)
     take_profit_cents:  int   = 1         # mapped to min_scalp_cents
 
@@ -95,6 +98,7 @@ def load_config() -> Config:
         max_hold_days      = int(os.getenv("MAX_HOLD_DAYS", "14")),
         profit_check_seconds = int(os.getenv("PROFIT_CHECK_SECONDS", "5")),
         take_profit_cents  = int(os.getenv("TAKE_PROFIT_CENTS", "1")),
+        require_liquid_legs = os.getenv("REQUIRE_LIQUID_LEGS", "true").lower() in ("true", "1", "yes"),
         dry_run            = os.getenv("DRY_RUN", "true").lower() in ("true", "1", "yes"),
         log_level          = os.getenv("LOG_LEVEL", "INFO"),
         log_file           = os.getenv("LOG_FILE", "kalshi_arb.log"),

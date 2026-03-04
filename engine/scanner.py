@@ -95,7 +95,7 @@ class EventArbOpportunity:
     event_title:       str
     arb_type:          str     # "buy_all_yes" or "buy_all_no"
     n_markets:         int
-    legs:              list    # [(ticker, price_cents), ...]
+    legs:              list    # [(ticker, price_cents, bid_cents), ...]
     sum_ask:           int     # total ask cost per 1 set (cents)
     revenue:           int     # guaranteed settlement revenue (cents)
     fee_total:         int     # total fees per set (cents)
@@ -103,11 +103,22 @@ class EventArbOpportunity:
     category:          str = ""
     collateral_type:   str = ""
     mutually_exclusive: bool = True
+    # Liquidity metadata
+    sum_bid:           int = 0   # sum of all leg bids
+    dead_legs:         int = 0   # legs with 0 bid (unsellable)
+    min_leg_bid:       int = 0   # lowest bid across all legs
+    max_spread:        int = 0   # widest ask-bid spread
+    exit_recovery_pct: float = 0.0  # % of cost recovered if sold instantly
 
     @property
     def roi_per_set(self) -> float:
         cost = self.sum_ask + self.fee_total
         return self.profit_per_set / cost if cost > 0 else 0.0
+
+    @property
+    def is_liquid(self) -> bool:
+        """True if ALL legs have bids — can exit at any time."""
+        return self.dead_legs == 0
 
 
 @dataclass
@@ -226,44 +237,87 @@ class MarketScanner:
             n = len(priced)
             fees = n * FEE_PER_CONTRACT
 
-            # BUY ALL YES: cost = sum(yes_ask) + fees, revenue = 100
+            # ── BUY ALL YES ──────────────────────────────────────────
             ya_sum = sum(m.yes_ask for m in priced)
+            yb_sum = sum(m.yes_bid for m in priced)
             profit_yes = 100 - ya_sum - fees
             if profit_yes > 0:
-                signals.append(EventArbOpportunity(
-                    event_ticker=et,
-                    event_title=ev.get("title", "")[:80],
-                    arb_type="buy_all_yes",
-                    n_markets=n,
-                    legs=[(m.ticker, m.yes_ask) for m in priced],
-                    sum_ask=ya_sum,
-                    revenue=100,
-                    fee_total=fees,
-                    profit_per_set=profit_yes,
-                    category=ev.get("category", ""),
-                    collateral_type=ev.get("collateral_return_type", ""),
-                ))
+                # Liquidity analysis
+                dead = sum(1 for m in priced if m.yes_bid <= 0)
+                min_bid = min(m.yes_bid for m in priced)
+                max_spr = max(m.yes_ask - m.yes_bid for m in priced)
+                buy_cost = ya_sum + fees
+                sell_back = max(0, yb_sum - n * FEE_PER_CONTRACT)
+                exit_pct = (sell_back / buy_cost * 100) if buy_cost > 0 else 0
 
-            # BUY ALL NO: cost = sum(no_ask), revenue = (N-1)*100
+                # LIQUIDITY GATE: skip if ANY leg has 0 bid
+                if dead == 0 or not self._cfg.require_liquid_legs:
+                    signals.append(EventArbOpportunity(
+                        event_ticker=et,
+                        event_title=ev.get("title", "")[:80],
+                        arb_type="buy_all_yes",
+                        n_markets=n,
+                        legs=[(m.ticker, m.yes_ask, m.yes_bid) for m in priced],
+                        sum_ask=ya_sum,
+                        revenue=100,
+                        fee_total=fees,
+                        profit_per_set=profit_yes,
+                        category=ev.get("category", ""),
+                        collateral_type=ev.get("collateral_return_type", ""),
+                        sum_bid=yb_sum,
+                        dead_legs=dead,
+                        min_leg_bid=min_bid,
+                        max_spread=max_spr,
+                        exit_recovery_pct=exit_pct,
+                    ))
+                else:
+                    logger.debug(
+                        "SKIP %s buy_all_yes: %d/%d dead legs, recovery=%.0f%%",
+                        et, dead, n, exit_pct,
+                    )
+
+            # ── BUY ALL NO ────────────────────────────────────────────
             na_sum = sum((100 - m.yes_bid) if m.yes_bid > 0 else 100 for m in priced)
+            nb_sum = sum((100 - m.yes_ask) if m.yes_ask > 0 else 0 for m in priced)  # no bids
             no_rev = (n - 1) * 100
             profit_no = no_rev - na_sum - fees
             if profit_no > 0:
-                signals.append(EventArbOpportunity(
-                    event_ticker=et,
-                    event_title=ev.get("title", "")[:80],
-                    arb_type="buy_all_no",
-                    n_markets=n,
-                    legs=[(m.ticker, 100 - m.yes_bid) for m in priced],
-                    sum_ask=na_sum,
-                    revenue=no_rev,
-                    fee_total=fees,
-                    profit_per_set=profit_no,
-                    category=ev.get("category", ""),
-                    collateral_type=ev.get("collateral_return_type", ""),
-                ))
+                no_asks = [(100 - m.yes_bid) if m.yes_bid > 0 else 100 for m in priced]
+                no_bids = [(100 - m.yes_ask) if m.yes_ask > 0 else 0 for m in priced]
+                dead = sum(1 for b in no_bids if b <= 0)
+                min_bid = min(no_bids)
+                max_spr = max(a - b for a, b in zip(no_asks, no_bids))
+                buy_cost = na_sum + fees
+                sell_back = max(0, nb_sum - n * FEE_PER_CONTRACT)
+                exit_pct = (sell_back / buy_cost * 100) if buy_cost > 0 else 0
 
-        signals.sort(key=lambda s: s.profit_per_set, reverse=True)
+                if dead == 0 or not self._cfg.require_liquid_legs:
+                    signals.append(EventArbOpportunity(
+                        event_ticker=et,
+                        event_title=ev.get("title", "")[:80],
+                        arb_type="buy_all_no",
+                        n_markets=n,
+                        legs=[(m.ticker, a, b) for m, a, b in zip(priced, no_asks, no_bids)],
+                        sum_ask=na_sum,
+                        revenue=no_rev,
+                        fee_total=fees,
+                        profit_per_set=profit_no,
+                        category=ev.get("category", ""),
+                        collateral_type=ev.get("collateral_return_type", ""),
+                        sum_bid=nb_sum,
+                        dead_legs=dead,
+                        min_leg_bid=min_bid,
+                        max_spread=max_spr,
+                        exit_recovery_pct=exit_pct,
+                    ))
+                else:
+                    logger.debug(
+                        "SKIP %s buy_all_no: %d/%d dead legs, recovery=%.0f%%",
+                        et, dead, n, exit_pct,
+                    )
+
+        # Sort: liquid arbs first, then by profit
+        signals.sort(key=lambda s: (s.dead_legs, -s.profit_per_set))
         return signals
 
     def _find_single_arbs(self, event_markets: Dict[str, list[dict]]) -> list[MarketQuote]:

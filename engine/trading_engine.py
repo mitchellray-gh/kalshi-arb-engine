@@ -93,6 +93,8 @@ class TradingEngine:
         print(f"  scalp_min={scalp}¢  trail_stop={trail}¢  "
               f"stop_loss={cfg.stop_loss_pct:.0%}")
         print(f"  STRATEGY: Arb + rapid profit-take → compound capital")
+        liq = "ON (only buy sellable contracts)" if getattr(cfg, 'require_liquid_legs', True) else "OFF"
+        print(f"  LIQUIDITY FILTER: {liq}")
         print("=" * 72 + "\n")
 
         while True:

@@ -131,10 +131,10 @@ class ArbExecutor:
         )
 
         if self._cfg.dry_run:
-            legs = [
-                LegResult(ticker=t, side=side, price_cents=p, quantity=qty, status="dry_run")
-                for t, p in opp.legs
-            ]
+            legs = []
+            for leg_data in opp.legs:
+                t, p = leg_data[0], leg_data[1]  # (ticker, ask, bid) or (ticker, ask)
+                legs.append(LegResult(ticker=t, side=side, price_cents=p, quantity=qty, status="dry_run"))
             return EventArbExecution(
                 event_ticker=opp.event_ticker, event_title=opp.event_title,
                 arb_type=opp.arb_type, legs=legs,
@@ -208,9 +208,12 @@ class ArbExecutor:
         assert self._client is not None
         results: List[LegResult] = []
 
+        # Normalize: extract (ticker, price) from (ticker, ask, bid) tuples
+        normalized = [(leg[0], leg[1]) for leg in legs]
+
         # Split into batches of 20 (Kalshi batch limit)
-        for i in range(0, len(legs), 20):
-            batch_legs = legs[i:i+20]
+        for i in range(0, len(normalized), 20):
+            batch_legs = normalized[i:i+20]
             orders = []
             for ticker, price in batch_legs:
                 orders.append({
@@ -293,7 +296,7 @@ class ArbExecutor:
         return qty
 
     def _event_err(self, opp: EventArbOpportunity, msg: str) -> EventArbExecution:
-        legs = [LegResult(t, "yes", p, 0, "error", error=msg) for t, p in opp.legs]
+        legs = [LegResult(leg[0], "yes", leg[1], 0, "error", error=msg) for leg in opp.legs]
         return EventArbExecution(
             event_ticker=opp.event_ticker, event_title=opp.event_title,
             arb_type=opp.arb_type, legs=legs,

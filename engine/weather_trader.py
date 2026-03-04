@@ -275,9 +275,9 @@ class WeatherTrader:
                 logger.debug("Skipping blacklisted city %s: %s", edge.city, edge.ticker)
                 continue
 
-            # Calculate order size
-            cost_per_contract = edge.market_ask  # cents
-            if cost_per_contract <= 0:
+            # Calculate order size (ask + 2¢ taker fee)
+            cost_per_contract = edge.market_ask + 2  # cents including taker fee
+            if edge.market_ask <= 0:
                 continue
 
             # Edge-scaled position sizing (backtest insight: bigger edges = more contracts)

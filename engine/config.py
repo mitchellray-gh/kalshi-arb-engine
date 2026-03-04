@@ -121,7 +121,7 @@ def load_config() -> Config:
         take_profit_cents  = int(os.getenv("TAKE_PROFIT_CENTS", "1")),
         require_liquid_legs = os.getenv("REQUIRE_LIQUID_LEGS", "true").lower() in ("true", "1", "yes"),
         wx_enabled         = os.getenv("WX_ENABLED", "true").lower() in ("true", "1", "yes"),
-        wx_min_edge        = float(os.getenv("WX_MIN_EDGE", "0.08")),
+        wx_min_edge        = float(os.getenv("WX_MIN_EDGE", "0.12")),
         wx_sigma           = float(os.getenv("WX_SIGMA", "2.5")),
         wx_max_bet_cents   = int(os.getenv("WX_MAX_BET_CENTS", "500")),
         wx_max_contracts   = int(os.getenv("WX_MAX_CONTRACTS", "10")),

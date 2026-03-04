@@ -281,13 +281,14 @@ def compute_edge(
     # Compute edge
     edge = noaa_prob - (ask / 100)
 
-    # Expected profit per contract if we buy at ask:
-    # If the contract settles YES (prob = noaa_prob): we get 100¢, paid ask¢, minus 2¢ taker fee
-    # If settles NO (prob = 1-noaa_prob): we lose ask¢
-    # EV = noaa_prob * (100 - ask - 2) - (1 - noaa_prob) * ask
-    #    = noaa_prob * (98 - ask) - ask + noaa_prob * ask
-    #    = noaa_prob * 98 - ask
-    ev_cents = noaa_prob * 98 - ask
+    # Expected profit per contract if we buy at ask (taker, 2¢ fee on buy):
+    # Cost: ask + 2¢ fee (paid REGARDLESS of outcome)
+    # If settles YES (prob = noaa_prob): receive 100¢, net = 100 - ask - 2 = 98 - ask
+    # If settles NO  (prob = 1-noaa_prob): receive 0¢, net = -(ask + 2)
+    # EV = noaa_prob * (98 - ask) - (1 - noaa_prob) * (ask + 2)
+    #    = 98P - P*ask - ask - 2 + P*ask + 2P
+    #    = 100P - ask - 2
+    ev_cents = noaa_prob * 100 - ask - 2
 
     # Confidence level based on edge magnitude
     # Backtest showed medium (12-20%) actually has HIGHER avg PnL (+14.4c)

@@ -68,6 +68,7 @@ class MarketEdge:
     bracket_type: str       # "above", "below", or "between"
     bracket_low: Optional[float] = None
     bracket_high: Optional[float] = None
+    side: str = "yes"              # "yes" = BUY YES, "no" = BUY NO
 
     # NOAA data
     noaa_forecast_f: float = 0.0
@@ -164,19 +165,23 @@ def compute_edge(
     min_edge: float = 0.08,
 ) -> Optional[MarketEdge]:
     """
-    Compute the edge between NOAA forecast probability and Kalshi market price.
-    
-    Args:
-        forecast: NOAA forecast for this city
-        ticker: Kalshi market ticker (e.g., 'KXHIGHNY-26MAR05-B41.5')
-        bid/ask: Market bid/ask in cents (0-99)
-        volume_24h: 24-hour trading volume
-        event_ticker: Parent event ticker
-        sigma: Forecast uncertainty in °F (std dev). Default 2.5°F.
-        min_edge: Minimum edge (as probability, e.g., 0.08 = 8%) to flag as tradeable
-    
-    Returns:
-        MarketEdge if tradeable edge found, None otherwise
+    Compute the best edge (BUY YES or BUY NO) between NOAA forecast
+    probability and Kalshi market price.
+
+    For each contract we evaluate both sides:
+      - BUY YES: edge = P(NOAA) - ask/100
+      - BUY NO:  edge = (1 - P(NOAA)) - no_ask/100  where no_ask = 100 - bid
+
+    Returns the side with the largest positive edge, or None if neither
+    clears min_edge.
+
+    T-bracket interpretation (BUG FIX):
+      - T-type contracts have two variants: upper tail (pays if temp >= threshold)
+        and lower tail (pays if temp < threshold).
+      - Primary signal: if threshold > noaa_forecast, it is almost certainly the
+        UPPER tail (rare event, low probability).  If threshold < noaa_forecast,
+        it is the LOWER tail.  We use ask price as a tiebreaker only when
+        threshold is within 1 sigma of the forecast (ambiguous zone).
     """
     parsed = parse_kalshi_ticker(ticker)
     if not parsed:
@@ -194,8 +199,7 @@ def compute_edge(
     elif mtype == "low":
         noaa_temp = forecast.daily_min_f.get(date_iso)
     elif mtype == "rain":
-        # Rain is a separate model — use precip probability directly
-        # For now, skip rain markets (they require different modeling)
+        # Rain requires a separate probability model — skip for now
         return None
     else:
         return None
@@ -204,109 +208,104 @@ def compute_edge(
         logger.debug("No NOAA forecast for %s %s on %s", city, mtype, date_iso)
         return None
 
-    # Compute probability based on bracket type
-    # 'B' + threshold (e.g., B41.5) = "between X and X+2" on Kalshi
-    # Actually from the market data: B41.5 means "41° to 42°" (range)
-    # T41 means "40° or below" (tail below threshold)
-    # But for probability: 
-    #   - For ME temperature markets, each contract pays if temp is in that bracket
-    #   - B41.5 → YES pays if temp >= 41.5 and < next bracket
-    #   - T41 with high temp → YES pays if temp < 41 (in the lower tail)
-    #   - T41 with high temp → YES pays if temp >= 41 (in the upper tail) ???
-    # 
-    # Let me re-examine: From the scan data:
-    #   KXHIGHNY-26MAR05-T48 → "49° or above" → pays if high >= 49
-    #   KXHIGHNY-26MAR05-B47.5 → "47° to 48°" → pays if 47 <= high <= 48
-    #   KXHIGHNY-26MAR05-B45.5 → "45° to 46°"
-    #   KXHIGHNY-26MAR05-B43.5 → "43° to 44°"  
-    #   KXHIGHNY-26MAR05-B41.5 → "41° to 42°"
-    #   KXHIGHNY-26MAR05-T41  → "40° or below" → pays if high <= 40
-    #
-    # So T## at the TOP = above threshold, T## at the BOTTOM = below threshold
-    # B##.5 = bracket from threshold-0.5 to threshold+0.5 (2°F wide)
-    #
-    # For simplicity: B41.5 covers [41, 43), B43.5 covers [43, 45), etc.
-    # Actually the .5 thresholds suggest: B41.5 means the bracket ≥ 41.5
-    # And each bracket is 2°F wide.
-    #
-    # The safest approach: For any YES contract at ask price P:
-    #   Our estimated fair value = NOAA_probability
-    #   Edge = NOAA_probability - P/100
-    #   If we can compute NOAA_probability for the bracket, we're good.
-    #
-    # For B##.5: pays if temp is in range [threshold-0.5, threshold+1.5)  (2°F bracket)
-    # For T## (lower tail on high): pays if temp < threshold
-    # For T## (upper tail on high): pays if temp >= threshold
-    
-    # Determine which type of bracket
+    # ── Compute P(YES settles) ─────────────────────────────────────────────
     if bracket_code == "T":
-        # T-type: This is a tail bracket
-        # If this is a HIGH temperature market:
-        #   T## at the low end → pays if high < threshold
-        #   T## at the high end → pays if high >= threshold
-        # We need to figure out if this is upper or lower tail
-        # Heuristic: if threshold < noaa_forecast, it's likely the lower tail
-        # Better: check if the ask is high (>50) → it's the likely outcome
-        # Simplest: compute P(temp < threshold) and P(temp >= threshold), use whichever
-        # matches the ask better (closer to ask/100)
-        
-        p_below = _prob_below(noaa_temp, threshold, sigma)
-        p_above = 1 - p_below
-        
-        # Which interpretation matches the market better?
-        ask_prob = ask / 100 if ask > 0 else 0.5
-        if abs(p_below - ask_prob) < abs(p_above - ask_prob):
-            # Market agrees this is "below threshold"
+        # Tail contract — determine whether this is the upper or lower tail.
+        #
+        # FIXED logic (replaces ask-proximity heuristic which misfires near
+        # the threshold):
+        #   1. If threshold is more than 0.5 sigma ABOVE the forecast →
+        #      upper tail (pays if temp >= threshold, rare high event).
+        #   2. If threshold is more than 0.5 sigma BELOW the forecast →
+        #      lower tail (pays if temp < threshold, rare low event).
+        #   3. Ambiguous zone (within 0.5 sigma): fall back to ask-proximity.
+        p_above = _prob_above(noaa_temp, threshold, sigma)
+        p_below = 1.0 - p_above
+        z = (threshold - noaa_temp) / sigma  # positive = threshold above forecast
+
+        if z > 0.5:
+            # Threshold clearly above forecast → upper tail
+            noaa_prob = p_above
+            desc = f"{mtype.title()} ≥ {threshold:.0f}°F"
+            btype = "above"
+        elif z < -0.5:
+            # Threshold clearly below forecast → lower tail
             noaa_prob = p_below
-            desc = f"{mtype.title()} < {threshold}°F"
+            desc = f"{mtype.title()} < {threshold:.0f}°F"
             btype = "below"
         else:
-            # Market agrees this is "above threshold" 
-            noaa_prob = p_above
-            desc = f"{mtype.title()} ≥ {threshold}°F"
-            btype = "above"
+            # Ambiguous — use ask price as tiebreaker (original heuristic)
+            ask_prob = ask / 100.0 if ask > 0 else 0.5
+            if abs(p_below - ask_prob) < abs(p_above - ask_prob):
+                noaa_prob = p_below
+                desc = f"{mtype.title()} < {threshold:.0f}°F"
+                btype = "below"
+            else:
+                noaa_prob = p_above
+                desc = f"{mtype.title()} ≥ {threshold:.0f}°F"
+                btype = "above"
     else:
         # B-type: bracket contract — pays if temp in [threshold-0.5, threshold+1.5)
-        # This is a 2°F bracket centered near the threshold
+        # Each bracket is 2°F wide, centred just below the .5 threshold value.
         bracket_low = threshold - 0.5
         bracket_high = threshold + 1.5
         noaa_prob = _prob_between(noaa_temp, bracket_low, bracket_high, sigma)
         desc = f"{mtype.title()} in [{bracket_low:.0f}°F, {bracket_high:.0f}°F)"
         btype = "between"
 
-    # Don't buy if ask is 0 or 100 (no opportunity)
-    if ask <= 0 or ask >= 99:
+    # ── Evaluate both YES and NO sides ────────────────────────────────────
+    # YES side: buy YES at ask price
+    #   EV = P(yes) * 100 - ask - 2  (taker fee on buy side only; Kalshi pays at settlement)
+    # NO side:  buy NO at no_ask = 100 - yes_bid
+    #   EV = P(no) * 100 - no_ask - 2
+    #
+    # We pick whichever side has the better positive edge.
+
+    def _evaluate(p_win: float, entry_price: int, label: str):
+        """Return (edge, ev) for buying a contract at entry_price with win probability p_win."""
+        if entry_price <= 0 or entry_price >= 99:
+            return None, None
+        e = p_win - entry_price / 100.0
+        ev = p_win * 100 - entry_price - 2  # subtract 2c taker fee
+        return e, ev
+
+    yes_ask_price = ask
+    no_ask_price = 100 - bid if bid > 0 else 0  # NO ask derived from YES bid
+
+    yes_edge, yes_ev = _evaluate(noaa_prob, yes_ask_price, "YES")
+    no_edge, no_ev = _evaluate(1.0 - noaa_prob, no_ask_price, "NO")
+
+    # Pick the best side
+    candidates = []
+    if yes_edge is not None and yes_edge >= min_edge and yes_ev is not None and yes_ev > 0:
+        candidates.append(("yes", yes_edge, yes_ev, yes_ask_price, noaa_prob, desc, btype))
+    if no_edge is not None and no_edge >= min_edge and no_ev is not None and no_ev > 0:
+        no_desc = desc.replace("≥", "<").replace(" < ", " ≥ ").replace("in [", "outside [") if btype != "between" else f"{mtype.title()} outside [{btype}]"
+        # Cleaner NO description
+        if btype == "above":
+            no_desc = f"{mtype.title()} < {threshold:.0f}°F"
+        elif btype == "below":
+            no_desc = f"{mtype.title()} ≥ {threshold:.0f}°F"
+        else:
+            bl = threshold - 0.5
+            bh = threshold + 1.5
+            no_desc = f"{mtype.title()} outside [{bl:.0f}°F, {bh:.0f}°F)"
+        candidates.append(("no", no_edge, no_ev, no_ask_price, 1.0 - noaa_prob, no_desc, btype))
+
+    if not candidates:
         return None
 
-    # Compute edge
-    edge = noaa_prob - (ask / 100)
+    # Best candidate by edge
+    best = max(candidates, key=lambda c: c[1])
+    best_side, best_edge, best_ev, best_price, best_prob, best_desc, best_btype = best
 
-    # Expected profit per contract if we buy at ask (taker, 2¢ fee on buy):
-    # Cost: ask + 2¢ fee (paid REGARDLESS of outcome)
-    # If settles YES (prob = noaa_prob): receive 100¢, net = 100 - ask - 2 = 98 - ask
-    # If settles NO  (prob = 1-noaa_prob): receive 0¢, net = -(ask + 2)
-    # EV = noaa_prob * (98 - ask) - (1 - noaa_prob) * (ask + 2)
-    #    = 98P - P*ask - ask - 2 + P*ask + 2P
-    #    = 100P - ask - 2
-    ev_cents = noaa_prob * 100 - ask - 2
-
-    # Confidence level based on edge magnitude
-    # Backtest showed medium (12-20%) actually has HIGHER avg PnL (+14.4c)
-    # than high (20%+, +9.9c) due to asymmetric payoff on cheaper contracts.
-    # Both are profitable. Low (<12%) was not tested and is excluded.
-    if edge >= 0.20:
+    # Confidence level
+    if best_edge >= 0.20:
         confidence = "high"
-    elif edge >= 0.12:
+    elif best_edge >= 0.12:
         confidence = "medium"
     else:
         confidence = "low"
-
-    if edge < min_edge:
-        return None
-
-    # Backtest: negative EV means even with edge, fees eat the profit
-    if ev_cents < 0:
-        return None
 
     me = MarketEdge(
         ticker=ticker,
@@ -314,23 +313,25 @@ def compute_edge(
         city=city,
         market_type=mtype,
         date=date_iso,
-        description=desc,
+        description=best_desc,
         threshold_f=threshold,
-        bracket_type=btype,
-        bracket_low=threshold - 0.5 if btype == "between" else None,
-        bracket_high=threshold + 1.5 if btype == "between" else None,
+        bracket_type=best_btype,
+        bracket_low=threshold - 0.5 if best_btype == "between" else None,
+        bracket_high=threshold + 1.5 if best_btype == "between" else None,
+        side=best_side,
         noaa_forecast_f=noaa_temp,
         noaa_sigma_f=sigma,
-        noaa_probability=round(noaa_prob, 4),
+        noaa_probability=round(best_prob, 4),
         market_bid=bid,
         market_ask=ask,
         market_volume_24h=volume_24h,
-        edge=round(edge, 4),
-        expected_profit_cents=round(ev_cents, 2),
+        edge=round(best_edge, 4),
+        expected_profit_cents=round(best_ev, 2),
         confidence=confidence,
     )
     logger.info(
-        "EDGE: %s  NOAA=%.0f°F  P(NOAA)=%.1f%%  ask=%d¢  edge=%.1f%%  EV=%.1f¢  [%s]",
-        ticker, noaa_temp, noaa_prob * 100, ask, edge * 100, ev_cents, confidence,
+        "EDGE: %s [%s]  NOAA=%.0f°F  P=%.1f%%  price=%d¢  edge=%.1f%%  EV=%.1f¢  [%s]",
+        ticker, best_side.upper(), noaa_temp, best_prob * 100, best_price,
+        best_edge * 100, best_ev, confidence,
     )
     return me

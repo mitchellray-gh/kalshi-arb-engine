@@ -284,10 +284,21 @@ class WeatherTrader:
                 logger.debug("Skipping blacklisted city %s: %s", edge.city, edge.ticker)
                 continue
 
-            # Calculate order size (ask + 2¢ taker fee)
-            cost_per_contract = edge.market_ask + 2  # cents including taker fee
-            if edge.market_ask <= 0:
-                continue
+            # Determine which side to buy and the entry price
+            # edge.side == "yes" → BUY YES at market ask
+            # edge.side == "no"  → BUY NO at no_ask = 100 - yes_bid
+            trade_side = getattr(edge, "side", "yes")
+            if trade_side == "no":
+                entry_price = 100 - edge.market_bid  # NO ask derived from YES bid
+                if entry_price <= 0 or entry_price >= 99:
+                    continue
+            else:
+                entry_price = edge.market_ask
+                if entry_price <= 0:
+                    continue
+
+            # Calculate order cost (entry price + 2¢ taker fee)
+            cost_per_contract = entry_price + 2
 
             # Edge-scaled position sizing (backtest insight: bigger edges = more contracts)
             if edge.edge >= 0.30:
@@ -313,9 +324,9 @@ class WeatherTrader:
 
             if dry_run:
                 logger.info(
-                    "[DRY RUN] BUY %d × %s @ %d¢  cost=$%.2f  edge=%.1f%%  EV=$%.2f  "
-                    "NOAA=%.0f°F  P(NOAA)=%.0f%%  [%s]",
-                    count, edge.ticker, edge.market_ask, total_cost / 100,
+                    "[DRY RUN] BUY %s %d × %s @ %d¢  cost=$%.2f  edge=%.1f%%  EV=$%.2f  "
+                    "NOAA=%.0f°F  P=%.0f%%  [%s]",
+                    trade_side.upper(), count, edge.ticker, entry_price, total_cost / 100,
                     edge.edge * 100, ev_total / 100,
                     edge.noaa_forecast_f, edge.noaa_probability * 100,
                     edge.confidence,
@@ -323,32 +334,38 @@ class WeatherTrader:
                 orders.append({
                     "ticker": edge.ticker,
                     "action": "buy",
+                    "side": trade_side,
                     "count": count,
-                    "price": edge.market_ask,
+                    "price": entry_price,
                     "dry_run": True,
                     "edge": edge.edge,
                     "ev_cents": ev_total,
                 })
             else:
                 try:
-                    result = self.client.create_order(
+                    order_kwargs = dict(
                         ticker=edge.ticker,
                         action="buy",
-                        side="yes",
+                        side=trade_side,
                         count=count,
                         order_type="limit",
-                        yes_price=edge.market_ask,
                     )
+                    if trade_side == "no":
+                        order_kwargs["no_price"] = entry_price
+                    else:
+                        order_kwargs["yes_price"] = entry_price
+                    result = self.client.create_order(**order_kwargs)
                     logger.info(
-                        "ORDER PLACED: BUY %d × %s @ %d¢  edge=%.1f%%  EV=$%.2f",
-                        count, edge.ticker, edge.market_ask,
+                        "ORDER PLACED: BUY %s %d × %s @ %d¢  edge=%.1f%%  EV=$%.2f",
+                        trade_side.upper(), count, edge.ticker, entry_price,
                         edge.edge * 100, ev_total / 100,
                     )
                     orders.append({
                         "ticker": edge.ticker,
                         "action": "buy",
+                        "side": trade_side,
                         "count": count,
-                        "price": edge.market_ask,
+                        "price": entry_price,
                         "dry_run": False,
                         "edge": edge.edge,
                         "ev_cents": ev_total,
@@ -405,11 +422,14 @@ class WeatherTrader:
             print(f"\n  {city}:")
             for e in edges:
                 arrow = "▲" if e.confidence == "high" else ("●" if e.confidence == "medium" else "○")
+                side = getattr(e, "side", "yes").upper()
+                entry = (100 - e.market_bid) if side == "NO" else e.market_ask
                 print(
                     f"    {arrow} {e.ticker:<42s}  "
+                    f"BUY {side}  "
                     f"NOAA={e.noaa_forecast_f:5.1f}°F  "
                     f"P={e.noaa_probability*100:5.1f}%  "
-                    f"ask={e.market_ask:2d}¢  "
+                    f"@{entry:2d}¢  "
                     f"edge={e.edge*100:+5.1f}%  "
                     f"EV={e.expected_profit_cents:+6.1f}¢  "
                     f"vol={e.market_volume_24h:5d}  "

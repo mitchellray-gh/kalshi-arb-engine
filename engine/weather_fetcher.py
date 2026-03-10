@@ -45,26 +45,28 @@ CITY_COORDS: Dict[str, Tuple[float, float]] = {
 
 # Kalshi ticker prefix → city code mapping
 KALSHI_CITY_MAP: Dict[str, str] = {
-    "KXHIGHNY":     "NYC",  "KXLOWTNYC":    "NYC",  "KXRAINNYC":  "NYC",
-    "KXHIGHTBOS":   "BOS",
-    "KXHIGHCHI":    "CHI",  "KXLOWTCHI":    "CHI",
-    "KXHIGHDEN":    "DEN",  "KXLOWTDEN":    "DEN",
-    "KXHIGHMIA":    "MIA",  "KXLOWTMIA":    "MIA",
-    "KXHIGHLAX":    "LAX",  "KXLOWTLAX":    "LAX",
-    "KXHIGHAUS":    "AUS",  "KXLOWTAUS":    "AUS",
-    "KXHIGHPHIL":   "PHIL", "KXLOWTPHIL":   "PHIL",
-    "KXHIGHTHOU":   "HOU",
-    "KXHIGHTDAL":   "DAL",
-    "KXHIGHTATL":   "ATL",
-    "KXHIGHTMIN":   "MIN",
-    "KXHIGHTLV":    "LV",
-    "KXHIGHTNOLA":  "NOLA",
-    "KXHIGHTOKC":   "OKC",
-    "KXHIGHTPHX":   "PHX",
-    "KXHIGHTSATX":  "SATX",
-    "KXHIGHTSEA":   "SEA",
-    "KXHIGHTSFO":   "SFO",
-    "KXHIGHTDC":    "DC",
+    # Daily high temperature markets
+    "KXHIGHNY":     "NYC",  "KXHIGHTBOS":   "BOS",  "KXHIGHCHI":  "CHI",
+    "KXHIGHDEN":    "DEN",  "KXHIGHMIA":    "MIA",  "KXHIGHLAX":  "LAX",
+    "KXHIGHAUS":    "AUS",  "KXHIGHPHIL":   "PHIL", "KXHIGHTHOU": "HOU",
+    "KXHIGHTDAL":   "DAL",  "KXHIGHTATL":   "ATL",  "KXHIGHTMIN": "MIN",
+    "KXHIGHTLV":    "LV",   "KXHIGHTNOLA":  "NOLA", "KXHIGHTOKC": "OKC",
+    "KXHIGHTPHX":   "PHX",  "KXHIGHTSATX":  "SATX", "KXHIGHTSEA": "SEA",
+    "KXHIGHTSFO":   "SFO",  "KXHIGHTDC":    "DC",
+    # Daily low temperature markets
+    "KXLOWTNYC":    "NYC",  "KXLOWTCHI":    "CHI",  "KXLOWTDEN":  "DEN",
+    "KXLOWTMIA":    "MIA",  "KXLOWTLAX":    "LAX",  "KXLOWTAUS":  "AUS",
+    "KXLOWTPHIL":   "PHIL",
+    # Daily rain markets
+    "KXRAINNYC":    "NYC",  "KXRAINCHI":    "CHI",  "KXRAINDEN":  "DEN",
+    "KXRAINMIA":    "MIA",  "KXRAINLAX":    "LAX",  "KXRAINAUS":  "AUS",
+    "KXRAINHOU":    "HOU",  "KXRAINDAL":    "DAL",  "KXRAINSEA":  "SEA",
+    "KXRAINSFO":    "SFO",
+    # Monthly rain accumulation markets (KXRAIN<CITY>M format)
+    "KXRAINNYCM":   "NYC",  "KXRAINCHIM":   "CHI",  "KXRAINDENM": "DEN",
+    "KXRAINMIAM":   "MIA",  "KXRAINLAXM":   "LAX",  "KXRAINAUSM": "AUS",
+    "KXRAINHOUM":   "HOU",  "KXRAINDALM":   "DAL",  "KXRAINSEAM": "SEA",
+    "KXRAINSFOM":   "SFO",
 }
 
 # NOAA timezone offsets (UTC offset for each city for date window calculation)

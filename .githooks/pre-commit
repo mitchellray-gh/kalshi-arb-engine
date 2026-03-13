@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Pre-commit hook to prevent accidentally committing private key files
+# Install by running: git config core.hooksPath .githooks
+
+set -e
+
+STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM)
+if [ -z "$STAGED_FILES" ]; then
+  exit 0
+fi
+
+for f in $STAGED_FILES; do
+  # reject any files that look like private keys
+  case "$f" in
+    *.key|*.pem|kalshi.key|kalshi.key.save)
+      echo "ERROR: Attempting to commit a private key or key-like file: $f" >&2
+      echo "Please remove it from the commit and add it to .gitignore." >&2
+      exit 1
+      ;;
+  esac
+done
+
+exit 0

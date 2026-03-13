@@ -250,3 +250,39 @@ The engine uses taker fees conservatively. In practice, placing limit orders as 
 - `websockets` — WebSocket streaming (future use)
 - `tabulate` — Pretty table output
 - `python-dotenv` — `.env` file loading
+
+## Additional helper scripts (weather, scanning, validation)
+
+The repository also contains a handful of small helper scripts used during development and live trading. These are useful for quick checks and for reproducing validation runs locally.
+
+- `place_orders.py` — fast order placement helper. Supports batching and safe fallbacks. Use with care: ensure `.env` points to a real key only when you intend to trade. Prefer `DRY_RUN=true` for testing.
+- `scan_now.py` — one-shot scanner that prints current edges and high-confidence targets.
+- `weather_sniper.py` — 30s-loop sniper that continuously searches weather markets for edges (used during demo runs).
+- `validate_pipeline.py` — full validation harness for NOAA data, ticker parsing, probability math, and EV calculations.
+- `validate_tfix.py` — small unit-style script that checks the T-bracket semantics and the off-by-one fixes. Run this after changes to `engine/weather_model.py`.
+- `portfolio_projection.py` — reads current positions/fills and projects expected EV and best/worst-case P&L.
+
+Quick usage notes:
+
+- Dry-run mode (safe):
+
+```bash
+# ensure dry-run
+export DRY_RUN=true
+python scan_now.py
+```
+
+- Run the T-bracket validation (fast):
+
+```bash
+python validate_tfix.py
+```
+
+- Install the local git hooks (recommended) so the repo blocks accidental commits of private keys:
+
+```bash
+./scripts/install-hooks.sh
+# or manually: git config core.hooksPath .githooks
+```
+
+Be careful: `place_orders.py` will place real orders when `DRY_RUN=false` and `.env` contains a valid `KALSHI_PRIVATE_KEY_PATH`. Always double-check before running in `prod`.

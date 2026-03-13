@@ -25,18 +25,17 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          pip install flake8
+          pip install flake8 pytest
 
       - name: Lint (flake8)
         run: |
           # Lint engine and top-level scripts; exit non-zero on issues
-          flake8 engine || true
-          flake8 . || true
+          flake8 engine
+          flake8 .
 
-      - name: Run validate_tfix (unit check)
+      - name: Run tests (pytest)
         env:
           DRY_RUN: 'true'
           CI: 'true'
         run: |
-          # validate_tfix.py should exit non-zero on failures
-          python validate_tfix.py
+          pytest -q

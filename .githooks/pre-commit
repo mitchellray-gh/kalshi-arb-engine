@@ -20,4 +20,26 @@ for f in $STAGED_FILES; do
   esac
 done
 
+# Run quick flake8 on staged Python files (fast subset lint)
+PY_FILES=""
+for f in $STAGED_FILES; do
+  if [[ "$f" == *.py ]]; then
+    PY_FILES="$PY_FILES $f"
+  fi
+done
+
+if [ -n "$PY_FILES" ]; then
+  # Run flake8 only on the staged python files. If flake8 isn't installed, skip with a warning.
+  if command -v flake8 >/dev/null 2>&1; then
+    echo "Running flake8 on staged Python files: $PY_FILES"
+    # Use --isolated to avoid user config interference; we only care about obvious errors.
+    flake8 --isolated $PY_FILES || {
+      echo "Flake8 failed on staged files. Fix issues or unstage files to bypass." >&2
+      exit 1
+    }
+  else
+    echo "Note: flake8 not installed locally; skipping staged-file lint. Install flake8 for pre-commit checks." >&2
+  fi
+fi
+
 exit 0

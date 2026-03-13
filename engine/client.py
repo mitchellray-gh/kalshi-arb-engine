@@ -106,6 +106,47 @@ class KalshiClient:
             raise KalshiAPIError(resp.status_code, resp.text, url)
         return resp.json() if resp.text else {}
 
+    # ── Price normalisation ─────────────────────────────────────────────────
+    # The Kalshi API returns prices as dollar strings (e.g. "0.4200") in
+    # *_dollars fields.  The rest of the codebase expects integer-cent
+    # fields: yes_bid, yes_ask, no_bid, no_ask, volume_24h, open_interest.
+    # We inject those here so every consumer gets the right types.
+
+    @staticmethod
+    def _dollars_to_cents(m: dict, key: str) -> int:
+        """Read `key` as int cents, falling back to `key_dollars` * 100."""
+        val = m.get(key)
+        if isinstance(val, (int, float)) and val > 0:
+            return int(val)
+        dval = m.get(key + "_dollars")
+        if dval:
+            try:
+                return int(round(float(dval) * 100))
+            except (ValueError, TypeError):
+                pass
+        return 0
+
+    @classmethod
+    def _normalize_market(cls, m: dict) -> dict:
+        """Inject integer-cent convenience fields onto a raw market dict."""
+        m["yes_bid"] = cls._dollars_to_cents(m, "yes_bid")
+        m["yes_ask"] = cls._dollars_to_cents(m, "yes_ask")
+        m["no_bid"]  = cls._dollars_to_cents(m, "no_bid")
+        m["no_ask"]  = cls._dollars_to_cents(m, "no_ask")
+        m["last_price"] = cls._dollars_to_cents(m, "last_price")
+        # Volume / OI sometimes come as float strings ("1234.00") via *_fp keys
+        for vkey, fallback in [("volume_24h", "volume_24h_fp"),
+                                ("volume", "volume_fp"),
+                                ("open_interest", "open_interest_fp")]:
+            if not isinstance(m.get(vkey), int) or m[vkey] == 0:
+                fb = m.get(fallback)
+                if fb:
+                    try:
+                        m[vkey] = int(float(fb))
+                    except (ValueError, TypeError):
+                        pass
+        return m
+
     # ── Market data (public — auth not required but included anyway) ──────────
 
     def get_events(
@@ -140,10 +181,19 @@ class KalshiClient:
             params["series_ticker"] = series_ticker
         if cursor:
             params["cursor"] = cursor
-        return self._get("/markets", params)
+        resp = self._get("/markets", params)
+        # Normalise every market dict so consumers get integer-cent fields
+        for m in resp.get("markets", []):
+            self._normalize_market(m)
+        return resp
 
     def get_market(self, ticker: str) -> dict:
-        return self._get(f"/markets/{ticker}")
+        resp = self._get(f"/markets/{ticker}")
+        if "market" in resp:
+            self._normalize_market(resp["market"])
+        else:
+            self._normalize_market(resp)
+        return resp
 
     def get_orderbook(self, ticker: str) -> dict:
         return self._get(f"/markets/{ticker}/orderbook")
@@ -160,10 +210,12 @@ class KalshiClient:
         params = {"status": status} if status else {}
         return self._get("/portfolio/orders", params)
 
-    def get_fills(self, ticker: str | None = None, limit: int = 100) -> dict:
+    def get_fills(self, ticker: str | None = None, limit: int = 100, cursor: str | None = None) -> dict:
         params: dict = {"limit": limit}
         if ticker:
             params["ticker"] = ticker
+        if cursor:
+            params["cursor"] = cursor
         return self._get("/portfolio/fills", params)
 
     def get_settlements(self) -> dict:

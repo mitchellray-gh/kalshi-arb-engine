@@ -163,6 +163,8 @@ def compute_edge(
     event_ticker: str = "",
     sigma: float = 2.5,
     min_edge: float = 0.08,
+    floor_strike: Optional[float] = None,
+    cap_strike: Optional[float] = None,
 ) -> Optional[MarketEdge]:
     """
     Compute the best edge (BUY YES or BUY NO) between NOAA forecast
@@ -175,13 +177,15 @@ def compute_edge(
     Returns the side with the largest positive edge, or None if neither
     clears min_edge.
 
-    T-bracket interpretation (BUG FIX):
-      - T-type contracts have two variants: upper tail (pays if temp >= threshold)
-        and lower tail (pays if temp < threshold).
-      - Primary signal: if threshold > noaa_forecast, it is almost certainly the
-        UPPER tail (rare event, low probability).  If threshold < noaa_forecast,
-        it is the LOWER tail.  We use ask price as a tiebreaker only when
-        threshold is within 1 sigma of the forecast (ambiguous zone).
+    T-bracket interpretation — CORRECTED:
+      Kalshi T-brackets use STRICT inequalities:
+        - floor_strike=N (no cap) → YES pays if temp > N  → i.e. temp ≥ N+1  (upper tail)
+        - cap_strike=N  (no floor) → YES pays if temp < N → i.e. temp ≤ N-1  (lower tail)
+      So we adjust the threshold by +1 for upper tail and -1 for lower tail
+      when computing the Gaussian probability, to avoid a 1-degree overestimate.
+
+      When floor_strike/cap_strike metadata is not available, we fall back to
+      a z-score heuristic to guess upper vs lower tail (less reliable).
     """
     parsed = parse_kalshi_ticker(ticker)
     if not parsed:
@@ -212,38 +216,61 @@ def compute_edge(
     if bracket_code == "T":
         # Tail contract — determine whether this is the upper or lower tail.
         #
-        # FIXED logic (replaces ask-proximity heuristic which misfires near
-        # the threshold):
-        #   1. If threshold is more than 0.5 sigma ABOVE the forecast →
-        #      upper tail (pays if temp >= threshold, rare high event).
-        #   2. If threshold is more than 0.5 sigma BELOW the forecast →
-        #      lower tail (pays if temp < threshold, rare low event).
-        #   3. Ambiguous zone (within 0.5 sigma): fall back to ask-proximity.
-        p_above = _prob_above(noaa_temp, threshold, sigma)
-        p_below = 1.0 - p_above
-        z = (threshold - noaa_temp) / sigma  # positive = threshold above forecast
+        # Kalshi T-brackets have STRICT inequality semantics:
+        #   floor_strike=N (no cap)  → YES settles if temp > N  → effectively temp ≥ N+1
+        #   cap_strike=N  (no floor) → YES settles if temp < N  → effectively temp ≤ N-1
+        #
+        # We use floor_strike/cap_strike from market metadata when available.
+        # Otherwise, fall back to z-score heuristic.
 
-        if z > 0.5:
-            # Threshold clearly above forecast → upper tail
-            noaa_prob = p_above
-            desc = f"{mtype.title()} ≥ {threshold:.0f}°F"
+        if floor_strike is not None and cap_strike is None:
+            # ── UPPER TAIL: YES pays if temp > floor_strike ──
+            # Strict inequality → effective threshold is floor_strike + 1
+            effective_threshold = threshold + 1
+            noaa_prob = _prob_above(noaa_temp, effective_threshold, sigma)
+            desc = f"{mtype.title()} > {threshold:.0f}°F (≥ {effective_threshold:.0f}°F)"
             btype = "above"
-        elif z < -0.5:
-            # Threshold clearly below forecast → lower tail
-            noaa_prob = p_below
-            desc = f"{mtype.title()} < {threshold:.0f}°F"
+        elif cap_strike is not None and floor_strike is None:
+            # ── LOWER TAIL: YES pays if temp < cap_strike ──
+            # P(T < cap_strike) = _prob_below(forecast, cap_strike, sigma)
+            # This is exact: _prob_below computes P(T < threshold) which is
+            # what Kalshi means by "strictly less than cap_strike"
+            effective_threshold = threshold - 1
+            noaa_prob = _prob_below(noaa_temp, threshold, sigma)
+            desc = f"{mtype.title()} < {threshold:.0f}°F (≤ {effective_threshold:.0f}°F)"
             btype = "below"
         else:
-            # Ambiguous — use ask price as tiebreaker (original heuristic)
-            ask_prob = ask / 100.0 if ask > 0 else 0.5
-            if abs(p_below - ask_prob) < abs(p_above - ask_prob):
-                noaa_prob = p_below
-                desc = f"{mtype.title()} < {threshold:.0f}°F"
+            # ── FALLBACK: no metadata available, use z-score heuristic ──
+            # Still apply +1 / -1 correction based on guessed direction
+            z = (threshold - noaa_temp) / sigma
+
+            if z > 0.5:
+                # Threshold above forecast → likely upper tail (> threshold)
+                effective_threshold = threshold + 1
+                noaa_prob = _prob_above(noaa_temp, effective_threshold, sigma)
+                desc = f"{mtype.title()} > {threshold:.0f}°F (≥ {effective_threshold:.0f}°F)"
+                btype = "above"
+            elif z < -0.5:
+                # Threshold below forecast → likely lower tail (< threshold)
+                noaa_prob = _prob_below(noaa_temp, threshold, sigma)
+                effective_threshold = threshold - 1
+                desc = f"{mtype.title()} < {threshold:.0f}°F (≤ {effective_threshold:.0f}°F)"
                 btype = "below"
             else:
-                noaa_prob = p_above
-                desc = f"{mtype.title()} ≥ {threshold:.0f}°F"
-                btype = "above"
+                # Ambiguous zone — use ask price as tiebreaker
+                ask_prob = ask / 100.0 if ask > 0 else 0.5
+                p_above_adj = _prob_above(noaa_temp, threshold + 1, sigma)
+                p_below_adj = _prob_below(noaa_temp, threshold, sigma)
+                if abs(p_below_adj - ask_prob) < abs(p_above_adj - ask_prob):
+                    noaa_prob = p_below_adj
+                    effective_threshold = threshold - 1
+                    desc = f"{mtype.title()} < {threshold:.0f}°F (≤ {effective_threshold:.0f}°F)"
+                    btype = "below"
+                else:
+                    noaa_prob = p_above_adj
+                    effective_threshold = threshold + 1
+                    desc = f"{mtype.title()} > {threshold:.0f}°F (≥ {effective_threshold:.0f}°F)"
+                    btype = "above"
     else:
         # B-type: bracket contract — pays if temp in [threshold-0.5, threshold+1.5)
         # Each bracket is 2°F wide, centred just below the .5 threshold value.
@@ -283,7 +310,7 @@ def compute_edge(
         no_desc = desc.replace("≥", "<").replace(" < ", " ≥ ").replace("in [", "outside [") if btype != "between" else f"{mtype.title()} outside [{btype}]"
         # Cleaner NO description
         if btype == "above":
-            no_desc = f"{mtype.title()} < {threshold:.0f}°F"
+            no_desc = f"{mtype.title()} ≤ {threshold:.0f}°F"
         elif btype == "below":
             no_desc = f"{mtype.title()} ≥ {threshold:.0f}°F"
         else:

@@ -206,6 +206,12 @@ class WeatherTrader:
                 if vol_24h < min_volume:
                     continue
 
+                # Extract floor_strike / cap_strike for T-bracket correction
+                fs = m.get("floor_strike")
+                cs = m.get("cap_strike")
+                floor_s = float(fs) if fs is not None else None
+                cap_s = float(cs) if cs is not None else None
+
                 edge = compute_edge(
                     forecast=forecast,
                     ticker=ticker,
@@ -215,6 +221,8 @@ class WeatherTrader:
                     event_ticker=event_ticker,
                     sigma=sigma,
                     min_edge=min_edge,
+                    floor_strike=floor_s,
+                    cap_strike=cap_s,
                 )
 
                 if edge:
